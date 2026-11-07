@@ -446,7 +446,7 @@ def test_shifted_keys_triangular_weights():
                         CurvePoint("1Y", date(2027, 6, 1), 0.014),
                         CurvePoint("2Y", date(2028, 6, 1), 0.014)])
     keys = [p.date for p in c.points]
-    # 只在 6M 上 +1bp,1Y 为 0 → 中点(线性按 τ)抬一半
+    # 只在 6M 上 +1bp,1Y 为 0 → 中点(线性按 τ)约抬一半
     shifted = c.shifted_keys(keys, [1e-4, 0.0, 0.0])
     mid = date(2027, 3, 1)
     tau_mid = (mid - VAL).days / 365
