@@ -270,9 +270,10 @@ def test_out_of_range_falls_back_to_weekend_rule():
     assert not cal.uses_fallback(date(2026, 5, 25))
 
 
-def test_adjust_modified_following_same_month():
+def test_adjust_modified_following_month_cross_back():
     cal = Calendar(BD)
-    assert cal.adjust_modified_following(date(2026, 5, 30)) == date(2026, 6, 1)
+    # 2026-05-30 周六 → 顺延到 06-01 跨月 → 改往前 05-29(周五)
+    assert cal.adjust_modified_following(date(2026, 5, 30)) == date(2026, 5, 29)
     # 2026-06-06 周六 → 顺延到 06-08 周一,未跨月
     assert cal.adjust_modified_following(date(2026, 6, 6)) == date(2026, 6, 8)
 
