@@ -2826,9 +2826,12 @@ def test_attribution_market_curve_curve_component_nonzero():
     assert len(body["detail"]) > 0
 
 
-def test_attribution_start_beyond_maturity_400():
-    """start 晚于到期日 → 内核窗口守卫 ValueError → 400(装配层错误映射钉住)。"""
-    req = {**VALUE_REQ, "start_date": "2026-12-15", "valuation_date": "2026-12-20"}
+def test_attribution_window_outside_life_400():
+    """窗口 (start, end] 与存续期无交集(end ≤ effective)→ 内核窗口守卫
+    ValueError → 400(装配层错误映射钉住;start 越过到期的场景已被路由
+    valuation>maturity 守卫前置拦截,内核该分支经 API 不可达)。"""
+    req = {**VALUE_REQ, "start_date": "2026-06-01", "valuation_date": "2026-06-02",
+           "effective_date": "2026-06-05", "maturity_date": "2026-12-01"}
     r = client.post("/api/attribution", json=req)
     assert r.status_code == 400
 
