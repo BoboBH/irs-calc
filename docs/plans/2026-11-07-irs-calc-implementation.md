@@ -993,7 +993,7 @@ def price_fixed_leg(sk: ScheduleSkeleton, notional: float, fixed_rate: float,
             pay_date=p.pay_date, accrual_start=p.accrual_start, accrual_end=p.accrual_end,
             days=(p.accrual_end - p.accrual_start).days, tau=tau, rate=fixed_rate,
             amount=amount, df=df, pv=amount * df))
-    return LegResult(rows=rows, pv=sum(r.pv for r in rows))
+    return LegResult(rows=rows, pv=sum((r.pv for r in rows), 0.0))
 ```
 
 - [ ] **Step 4: 运行确认通过**
@@ -1151,14 +1151,18 @@ Expected: FAIL(`ImportError: cannot import name 'price_floating_leg'`)。
 在 `backend/app/core/pricing.py` 末尾追加:
 ```python
 def _lookup_fixing(fixings: dict[date, float], reset_date: date) -> float:
-    """取 reset_date 当日或之前最近一条定盘;缺失抛 MissingFixingError。"""
+    """取 reset_date 当日或之前最近一条定盘;缺失抛 MissingFixingError。
+
+    有意不设时效上界(设计 §10 口径:定盘按"重置日当日或之前最近"取);
+    定盘新鲜度检查与告警由上层(loader / API)负责。
+    """
     candidates = [d for d in fixings if d <= reset_date]
     if not candidates:
         raise MissingFixingError(f"缺少重置日 {reset_date} 及之前的定盘利率")
     return fixings[max(candidates)]
 
 
-def resolve_sub_rate(sp, valuation: date, curve: ZeroCurve, spec: BenchmarkSpec,
+def resolve_sub_rate(sp: SubPeriodSkeleton, valuation: date, curve: ZeroCurve, spec: BenchmarkSpec,
                      fixings: dict[date, float]) -> tuple[float, str]:
     """子区间利率:重置日 ≤ 估值日 → 定盘;否则曲线隐含远期。"""
     if sp.reset_date <= valuation:
@@ -1169,6 +1173,11 @@ def resolve_sub_rate(sp, valuation: date, curve: ZeroCurve, spec: BenchmarkSpec,
 def price_floating_leg(sk: ScheduleSkeleton, notional: float, valuation: date,
                        curve: ZeroCurve, spec: BenchmarkSpec,
                        fixings: dict[date, float], spread: float = 0.0) -> LegResult:
+    """浮动腿定价:每期 CF = N·(Σ rₖ·τₖ + spread·Στₖ),τₖ 按基准计息惯例;ex-coupon。
+
+    CashflowRow.rate 为指标利率的 τ 加权均值,**不含 spread**(amount 含 spread,
+    勿用 rate·τ 重建金额);sub_periods 保留逐子区间明细。
+    """
     if curve.valuation_date != valuation:
         raise ValueError(f"曲线估值日 {curve.valuation_date} 与定价估值日 {valuation} 不一致")
     dc = spec.day_count
@@ -1193,7 +1202,7 @@ def price_floating_leg(sk: ScheduleSkeleton, notional: float, valuation: date,
             days=(p.accrual_end - p.accrual_start).days, tau=total_tau,
             rate=acc / total_tau if total_tau else 0.0,
             amount=amount, df=df, pv=amount * df, sub_periods=sub_rows))
-    return LegResult(rows=rows, pv=sum(r.pv for r in rows))
+    return LegResult(rows=rows, pv=sum((r.pv for r in rows), 0.0))
 ```
 
 - [ ] **Step 4: 运行确认通过**
