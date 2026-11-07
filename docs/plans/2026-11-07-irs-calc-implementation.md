@@ -2317,6 +2317,18 @@ def test_market_missing_date_404():
 def test_market_bad_benchmark_422():
     r = client.get("/api/market", params={"benchmark": "SOFR", "date": "2026-11-06"})
     assert r.status_code == 422
+
+
+def test_market_transition_period_fixing_none_and_calendar_approximate():
+    """换算期(曲线已有、FR007 定盘 2025-01-02 才开始):fixing=None + 日历回退标志。
+
+    钉住"最新 ≤ date"取法与 calendar_approximate;换算期真实边界,数据刷新即碎(同其余快照测试)。
+    """
+    r = client.get("/api/market", params={"benchmark": "FR007", "date": "2024-12-02"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["fixing"] is None
+    assert body["calendar_approximate"] is True
 ```
 
 (文件顶部补 `import pytest`。)
@@ -2338,6 +2350,7 @@ from __future__ import annotations
 import logging
 import os
 import glob
+import re
 from datetime import datetime, timedelta
 from logging.handlers import RotatingFileHandler
 
@@ -2355,15 +2368,17 @@ class DailySizeRotatingHandler(RotatingFileHandler):
         self.base_path = base_path
         stamp = datetime.now().strftime("%Y%m%d")
         super().__init__(f"{base_path}.{stamp}", maxBytes=MAX_BYTES,
-                         backupCount=KEEP_DAYS * 50, encoding="utf-8")
+                         backupCount=KEEP_DAYS * 50, encoding="utf-8", delay=True)
         self.day_stamp = stamp
 
     def emit(self, record: logging.LogRecord) -> None:
         today = datetime.now().strftime("%Y%m%d")
         if today != self.day_stamp:  # 跨天:换新文件并清理过期
             self.day_stamp = today
+            if self.stream is not None:  # 显式关旧流,Windows 释放句柄便于清理
+                self.stream.close()
+                self.stream = None
             self.baseFilename = os.path.abspath(f"{self.base_path}.{today}")
-            self.stream = None
             if self.backupCount > 0:
                 self._cleanup_expired()
         super().emit(record)
@@ -2371,8 +2386,10 @@ class DailySizeRotatingHandler(RotatingFileHandler):
     def _cleanup_expired(self) -> None:
         cutoff = (datetime.now() - timedelta(days=KEEP_DAYS)).strftime("%Y%m%d")
         for f in glob.glob(f"{self.base_path}.*"):
-            stamp = f.rsplit(".", 1)[-1]
-            if stamp[:8] < cutoff:
+            # 文件名形如 base.YYYYMMDD 或 base.YYYYMMDD.N(大小滚动序号):
+            # 只删带 8 位日戳且早于 cutoff 的,杂散文件不动
+            m = re.search(r"\.(\d{8})(?:\.\d+)?$", os.path.basename(f))
+            if m and m.group(1) < cutoff:
                 try:
                     os.remove(f)
                 except OSError:
@@ -2432,7 +2449,7 @@ class TradeRequest(BaseModel):
     fixed_freq_months: int = Field(default=3, ge=1, le=12)
     valuation_date: date
     curve: list[CurvePointIn] = []     # 空 = 按估值日自动从行情加载
-    fixing_overrides: dict[str, float] = {}  # {"2026-11-05": 1.37}(%)
+    fixing_overrides: dict[date, float] = {}  # {"2026-11-05": 1.37}(%);ISO 串自动转 date,坏串 422
 
 
 class AttributionRequest(TradeRequest):
@@ -2486,10 +2503,10 @@ def get_calendar() -> Calendar:
     return loader.build_calendar()
 
 
-def load_fixings(benchmark: str, overrides: dict[str, float] | None = None) -> dict[date, float]:
+def load_fixings(benchmark: str, overrides: dict[date, float] | None = None) -> dict[date, float]:
     fx = dict(loader.fixings_for(benchmark))
     for d, v in (overrides or {}).items():
-        fx[date.fromisoformat(d)] = v / 100.0
+        fx[d] = v / 100.0
     return fx
 
 
@@ -2616,16 +2633,17 @@ BENCH_VALID = {"FR007", "SHIBOR3M"}
 def get_market(benchmark: str = Query(...), date: date = Query(...)):
     if benchmark not in BENCH_VALID:
         raise HTTPException(422, f"不支持的基准: {benchmark}")
-    try:
+    try:  # 三个 loader 调用同读 CSV,统一映射数据错误
         pts = loader.curve_for(benchmark, date)
+        fx = loader.fixings_for(benchmark)
+        cal = loader.build_calendar()
     except loader.MarketDataError as e:
         raise HTTPException(404, str(e))
-    fx = loader.fixings_for(benchmark)
     fixing = None
-    if fx:
-        latest = max(d for d in fx if d <= date)
+    eligible = [d for d in fx if d <= date]
+    if eligible:
+        latest = max(eligible)
         fixing = {"date": latest.isoformat(), "rate": fx[latest] * 100.0}
-    cal = loader.build_calendar()
     return MarketOut(
         benchmark=benchmark, valuation_date=date,
         curve=[{"tenor": p.label, "rate": p.rate * 100.0} for p in pts],
@@ -2657,7 +2675,7 @@ def health():
 ```bash
 cd /d/git/irs-calc/backend && py -m pytest tests/test_api.py -v
 ```
-Expected: 4 passed。
+Expected: 5 passed。
 
 - [ ] **Step 6: Commit**
 
@@ -2832,7 +2850,7 @@ app.include_router(attribution_router)
 ```bash
 cd /d/git/irs-calc/backend && py -m pytest tests/test_api.py -v
 ```
-Expected: 9 passed(4 旧 + 5 新)。
+Expected: 10 passed(5 旧 + 5 新)。
 
 - [ ] **Step 5: 全量回归**
 
@@ -2846,6 +2864,13 @@ Expected: 全部通过。
 ```bash
 cd /d/git/irs-calc && git add backend && git commit -m "feat(api): 估值与归因接口"
 ```
+
+Task 11 质量评审移交事项(实现 Task 12 时必须处理,勿重蹈 "warnings 恒空"):
+
+1. **定盘新鲜度告警**:`do_value` 的 `warnings` 目前恒空(pricing `_lookup_fixing` docstring 明文把时效性委托上层)。Task 12 须落地:估值日无当日定盘、或所用定盘明显陈旧时,往 warnings 写中文告警。
+2. **坏 tenor 映射**:用户显式 curve 中 tenor 串非法(`tenor_to_months` 抛 ValueError)或重复(`ZeroCurve` 抛 ValueError)→ 路由层映射 4xx 字段级错误,不得 500。
+3. data/*.csv 文件缺失抛 FileNotFoundError(OSError)→ 可映射 503("行情数据不可用")。
+4. 每请求 CSV 解析 4-5 次(曲线/定盘/日历)——当前体量可接受;若做缓存按 mtime 失效,勿内存常驻。
 
 ---
 
@@ -3433,6 +3458,13 @@ cd /d/git/irs-calc && git add -A && git commit -m "chore: 端到端验收通过"
 - SHIBOR3M 归因测试缺口;curve-down 情景;spread≠0 归因
 - 设计候选(二期):尾部敏感度"保留尾桶"而非折入末档(涉及 §4.5 口径与 Task 8 钉测试)
 
-### API 层(Task 11/12 评审时更新)
+### API 层(Task 11 评审遗留 Minor;Task 12 的移交事项已写入 Task 12 节)
 - 定盘时效性告警(freshness)是 API 层职责(pricing._lookup_fixing docstring 已记录);Task 12 落地
 - MarketDataError→404 映射已由 loader 全覆盖(品种缺期限/估值日无行情/定盘空/解析错误)
+- M2:market 取最新定盘可 `max((d for d in fx if d <= date), default=None)` 一遍完成
+- M3:定盘利率出参浮点噪声(实测 2025-01-02 → 1.8000000000000003)→ 出参 round(x, 6)
+- M4/M9:fixing=None 语义("早于定盘史"与"全无定盘"不可辨)写进 schemas 注释;可给 FixingOut(date, rate) 小模型
+- M7:跨进程多 worker 共享同一日志文件时 Windows rename 失败丢记录(单例仅进程内)——加边界注释
+- M10:422 测试未断言响应体(与 404 不对称);真实数据快照测试可考虑断言形状而非精确值
+- M11:setup_logging 在 import 期执行,可改 FastAPI lifespan(现状无害)
+- M12:每请求 CSV 解析 3-5 次,延迟敏感时按 mtime 缓存
