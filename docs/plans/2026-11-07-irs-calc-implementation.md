@@ -1739,6 +1739,28 @@ def test_min_pay_date_window_for_cf():
     leg = price_fixed_leg(sk, 100_000_000, 0.0165, t1, curve_t1, CAL, 365,
                           min_pay_date=date(2026, 9, 1))
     assert [r.pay_date for r in leg.rows] == [date(2026, 12, 1)]
+
+
+def test_value_swap_rejects_bad_direction():
+    """direction 非 receiver/payer 时抛 ValueError(Task 7 评审骑乘:消除静默反号)。"""
+    bad = dict(TRADE, direction="Receiver")
+    try:
+        value_swap(bad, VAL, flat_curve(), CAL, BENCHMARKS["FR007"],
+                   fixings={date(2026, 6, 1): 0.014})
+        raise AssertionError("应当抛出 ValueError")
+    except ValueError:
+        pass
+
+
+def test_value_swap_defaults_spread_and_freq():
+    """缺省 spread=0、fixed_freq 缺省取 spec.fixed_freq_months,与显式传值一致。"""
+    minimal = dict(TRADE)
+    del minimal["spread"], minimal["fixed_freq_months"]
+    res_default = value_swap(minimal, VAL, flat_curve(), CAL, BENCHMARKS["FR007"],
+                             fixings={date(2026, 6, 1): 0.014})
+    res_full = value_swap(TRADE, VAL, flat_curve(), CAL, BENCHMARKS["FR007"],
+                          fixings={date(2026, 6, 1): 0.014})
+    assert res_default["npv"] == res_full["npv"]
 ```
 
 - [ ] **Step 2: 运行确认失败**
@@ -1772,7 +1794,7 @@ def _eligible_periods(sk: ScheduleSkeleton, valuation: date,
 
 `resolve_sub_rate` 改为:
 ```python
-def resolve_sub_rate(sp, valuation: date, curve: ZeroCurve, spec: BenchmarkSpec,
+def resolve_sub_rate(sp: SubPeriodSkeleton, valuation: date, curve: ZeroCurve, spec: BenchmarkSpec,
                      fixings: dict[date, float],
                      fixing_cutoff: date | None = None) -> tuple[float, str]:
     """子区间利率:重置日 ≤ cutoff(默认=估值日)→ 定盘;否则曲线隐含远期。"""
@@ -1813,6 +1835,22 @@ def value_swap(trade: dict, valuation: date, curve: ZeroCurve, calendar: Calenda
                                  min_pay_date=min_pay_date, fixing_cutoff=fixing_cutoff)
 ```
 
+同时(Task 7 评审骑乘):`value_swap` 函数体开头(计算 omega 前)加方向守卫:
+```python
+    if trade["direction"] not in ("receiver", "payer"):
+        raise ValueError(f"direction 必须为 receiver|payer,得到: {trade['direction']!r}")
+```
+docstring 同步改为:
+```python
+    """整笔互换估值。
+
+    trade 键:direction/notional/fixed_rate/spread/effective_date/maturity_date/
+    fixed_freq_months(benchmark 键由调用方解析为 spec,本函数不读;
+    direction: receiver|payer,receiver=收固定 ω=+1,其他值抛 ValueError)。
+    返回 dict:npv/pv_fixed/pv_floating/omega/fixed_rows/floating_rows。
+    """
+```
+
 - [ ] **Step 4: 修改 risk.py**
 
 `parallel_dv01` 与 `krdv01` 均加关键字参数 `fixing_cutoff: date | None = None`,内部 `_npv_with_curve` 透传:
@@ -1829,7 +1867,7 @@ def _npv_with_curve(trade: dict, valuation: date, curve: ZeroCurve, calendar: Ca
 ```bash
 cd /d/git/irs-calc/backend && py -m pytest tests/test_pricing.py tests/test_risk.py -v
 ```
-Expected: 11 + 3 passed(新 2 个也通过)。
+Expected: 16 + 3 passed(pricing 12 旧 + cutoff/min_pay_date/direction/缺省 4 新;全量套件 58 passed)。
 
 - [ ] **Step 6: 写归因失败测试**
 
