@@ -2752,16 +2752,20 @@ def test_value_matches_core():
 
 
 def test_value_missing_fixing_422():
-    bad = {**VALUE_REQ, "fixing_overrides": {}}
+    """起息/估值早于定盘序列起点(真实数据自 2025-01-02 起),overrides 为空 → 422。
+    (原 2026-06-01 场景不成立:真实定盘在该日存在,合并后不会缺失——实测。)"""
+    bad = {**VALUE_REQ, "effective_date": "2024-12-02", "valuation_date": "2024-12-02",
+           "maturity_date": "2025-06-01", "fixing_overrides": {}}
     r = client.post("/api/value", json=bad)
     assert r.status_code == 422
     assert "定盘" in r.json()["detail"]
 
 
 def test_value_stale_fixing_warning():
-    """估值日晚于定盘序列末尾(真实数据止于 2026-11-06)→ warnings 含定盘陈旧告警
-    (Task 11 移交项 1:warnings 不得恒空)。"""
-    req = {**VALUE_REQ, "valuation_date": "2026-12-01"}
+    """估值日 2026-11-20 晚于定盘序列末尾(真实数据止于 2026-11-06,缺口 14 天 > 7)
+    → warnings 含定盘陈旧告警(Task 11 移交项 1);且 11-20 < 到期日,ex-coupon 下
+    尚有 12-01 支付 → npv≠0(原 12-01 场景等于到期日,现金流全被剔除,npv 恒 0)。"""
+    req = {**VALUE_REQ, "valuation_date": "2026-11-20"}
     r = client.post("/api/value", json=req)
     assert r.status_code == 200
     body = r.json()
@@ -2780,8 +2784,13 @@ def test_value_bad_tenor_400():
 
 
 def test_attribution_identity_ok():
+    """窗口 (06-01, 06-05] 内无新重置(周网格 06-01/06-08)→ 定盘-远期楔子不进 ε,
+    identity_ok=True。原 06-08 场景:窗口含 06-08 重置,npv_t1 用真实定盘 1.41 而
+    npv_static 用静态远期 ≈1.3996,一阶楔子 ≈−191 元按白皮书 §4.7 口径进残差,
+    残差门(5%·max(|ΔNPV|,|Curve|,1))如实拒绝——计算正确,是场景选在了楔子上;
+    门与楔子的设计取舍记收尾清单。"""
     req = {**VALUE_REQ,
-           "start_date": "2026-06-01", "valuation_date": "2026-06-08",
+           "start_date": "2026-06-01", "valuation_date": "2026-06-05",
            "effective_date": "2026-06-01", "maturity_date": "2028-06-01",
            "fixing_overrides": {"2026-06-01": 1.4}}
     r = client.post("/api/attribution", json=req)
@@ -3506,3 +3515,4 @@ cd /d/git/irs-calc && git add -A && git commit -m "chore: 端到端验收通过"
 - M10:422 测试未断言响应体(与 404 不对称);真实数据快照测试可考虑断言形状而非精确值
 - M11:setup_logging 在 import 期执行,可改 FastAPI lifespan(现状无害)
 - M12:每请求 CSV 解析 3-5 次,延迟敏感时按 mtime 缓存
+- 设计取舍(Task 12 实现轮实测):归因窗口含新重置且真实定盘偏离静态远期时,一阶楔子按白皮书 §4.7 口径进 ε(实测 1.04bp 楔子 ≈ −191 元/亿),残差门 5%·max(|ΔNPV|,|Curve|,1) 会如实报 identity_ok=False——门分母加 N 比例项、或 ε 显式分离"定盘效应"分量为二期候选;Task 16 验收选窗口时留意(1 日窗口大多不含重置)
