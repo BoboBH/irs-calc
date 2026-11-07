@@ -1064,7 +1064,9 @@ def test_floating_fr007_forward_only():
     assert all(sp.source == "forward" for sp in p1.sub_periods[1:])
     for sp in p1.sub_periods[1:]:
         expected_rate = 0.014 / (1 + 0.014 * (sp.reset_date - VAL).days / 365)
-        assert sp.rate == expected_rate
+        # DF 比值路径与闭式路径有 ULP 级舍入差(末段 1 天子区间最差 ~8e-14),不能位级相等
+        # (同 test_curve.py::test_forward_flat_curve_equals_flat_rate 的容差处理)
+        assert abs(sp.rate - expected_rate) < 1e-12
     expected_cf = N * (0.0135 * 7 / 365 + sum(
         (0.014 / (1 + 0.014 * (sp.reset_date - VAL).days / 365))
         * ((sp.accrual_end - sp.accrual_start).days / 365)
@@ -1098,9 +1100,16 @@ def test_floating_fr007_past_reset_uses_fixing():
     fixings = {date(2026, 6, 1): 0.0135, date(2026, 6, 8): 0.0136}
     leg = price_floating_leg(sk, 100_000_000, mid, curve_mid, spec, fixings=fixings, spread=0.0)
     p1 = leg.rows[0]
+    # 计划文本修正:重置网格为 06-01/06-08/06-15/06-22/…,估值日 06-20 时
+    # 前 3 个子区间 reset≤估值日 → 定盘;首个远期是 sub[3](reset 06-22)。
     assert p1.sub_periods[0].source == "fixing"
+    assert p1.sub_periods[0].rate == 0.0135
     assert p1.sub_periods[1].source == "fixing"
-    assert p1.sub_periods[2].source == "forward"
+    assert p1.sub_periods[1].rate == 0.0136
+    # 06-15 无当日定盘 → 回看取 06-08 的 0.0136(_lookup_fixing 回看分支)
+    assert p1.sub_periods[2].source == "fixing"
+    assert p1.sub_periods[2].rate == 0.0136
+    assert p1.sub_periods[3].source == "forward"
 
 
 def test_floating_fr007_missing_fixing_raises():
@@ -1192,7 +1201,7 @@ def price_floating_leg(sk: ScheduleSkeleton, notional: float, valuation: date,
 ```bash
 cd /d/git/irs-calc/backend && py -m pytest tests/test_pricing.py -v
 ```
-Expected: 8 passed(3 旧 + 5 新)。
+Expected: 9 passed(3 旧 + 5 新浮动 + 1 ex-coupon 边界锁定)。全量套件 36 passed。
 
 - [ ] **Step 5: Commit**
 
