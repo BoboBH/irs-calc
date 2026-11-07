@@ -3560,3 +3560,8 @@ cd /d/git/irs-calc && git add -A && git commit -m "chore: 端到端验收通过"
 - M-4:attribution start≥valuation 用 422、其余参数错 400,状态码风格不一(422 应只留 pydantic 层);test_attribution_bad_dates_422 已钉 422,改动需连测试
 - M-5:两路由 except 链复制,第三路由出现时应上收为全局 exception_handler
 - M-6:test_value_bad_tenor_400 未断 detail 文案;503 路径无测试(monkeypatch loader 可行)
+
+### Task 13(静态托管,复审 Approved 时遗留)
+- M1:`_dist.exists()` 仅导入期求值一次——先启动后端、后构建 dist 时挂载不生效,需重启进程;建议加注释说明,可在跳过挂载时打一条 debug 日志(便于 Task 14 联调排查)
+- M2:`html=True` 只回退目录路径的 index.html,不是 SPA history 路由兜底(本项目前端无 vue-router、单视图,不受影响;若二期加路由/deep-link 需另加 catch-all fallback)
+- M3:可选——挂载成功时打一行日志含 dist 路径,便于部署核查(纯 observability)
