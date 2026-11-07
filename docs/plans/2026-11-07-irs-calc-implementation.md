@@ -1518,7 +1518,7 @@ def test_curve_for_fr007_20261106():
     assert [p.label for p in pts] == list(BENCHMARKS["FR007"].swap_tenors)
     assert pts[0].label == "1M"
     assert pts[0].rate == pytest.approx(0.013838)
-    assert pts[0].date == date(2026, 7, 6)      # 估值日 + 1M
+    assert pts[0].date == date(2026, 12, 6)     # 估值日 2026-11-06 + 1M
     assert pts[-1].label == "10Y"
     assert pts[-1].rate == pytest.approx(0.019)
 
