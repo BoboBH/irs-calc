@@ -68,6 +68,9 @@
             </el-button>
           </el-form-item>
         </el-form>
+        <div style="color:#909399;font-size:13px;margin-bottom:8px">
+          未修改曲线时,归因自动取 t0/t1 两日行情;修改表内曲线后按该曲线归因(两日同形则曲线效应为 0)
+        </div>
         <el-alert v-if="marketApprox" type="warning" :closable="false"
                   title="当前日期在交易日历数据范围之外,日历按周末规则近似" style="margin-bottom: 8px" />
         <el-table :data="curveRows" size="small" style="width: 100%">
@@ -104,13 +107,16 @@
       <el-tabs v-model="activeTab" style="margin-bottom: 24px">
         <el-tab-pane label="关键期限 DV01" name="krdv">
           <el-table v-if="valueResult" :data="valueResult.krdv01" size="small">
+            <template #empty>
+              <span style="color:#909399">剩余期限不足最小期限点,DV01 不适用</span>
+            </template>
             <el-table-column prop="tenor" label="期限" width="90" />
             <el-table-column prop="dv01" label="KRDV01(元/bp)">
               <template #default="{ row }">{{ fmt(row.dv01) }}</template>
             </el-table-column>
           </el-table>
           <div v-if="valueResult" style="color:#909399;font-size:13px;margin-top:6px">
-            合计 = {{ fmt(krdvSum) }};应等于平行 DV01
+            合计 = {{ fmt(krdvSum) }};≈ 平行 DV01
           </div>
         </el-tab-pane>
 
@@ -179,7 +185,8 @@
                   <div style="color:#909399;font-size:13px">勾稽校验</div>
                   <div :style="{ color: attributionResult.identity.ok ? '#67c23a' : '#f56c6c' }">
                     {{ attributionResult.identity.ok ? '通过' : '失败' }}
-                    (差 {{ attributionResult.identity.diff.toExponential(2) }})
+                    (差 {{ attributionResult.identity.diff === 0 ? '0'
+                          : attributionResult.identity.diff.toExponential(2) }})
                   </div>
                 </el-card>
               </el-col>
@@ -231,6 +238,7 @@ const StatCard = defineComponent({
 
 function formatNumber(v) {
   if (v == null || Number.isNaN(v)) return '-'
+  if (Object.is(v, -0)) v = 0  // 负零归一化,避免明细里出现 "-0.00"
   return v.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
@@ -241,6 +249,7 @@ const form = ref({
   fixedFreqMonths: 3, valuationDate: '2026-11-06', startDate: '',
 })
 const curveRows = ref([])
+let marketCurveSnapshot = null  // 最近一次加载行情的曲线快照(深拷贝,刻意不用响应式)
 const fixingInfo = ref(null)
 const marketApprox = ref(false)
 const loadingMarket = ref(false)
@@ -285,6 +294,18 @@ function payload() {
   }
 }
 
+// 归因曲线模式:表内曲线与加载行情时的快照逐行一致(或表内为空)→ 发空曲线,
+// 后端按 t0/t1 两日行情各自加载(真实两日位移能算出非零曲线效应);
+// 用户改过表内曲线 → 仍发显式行(两日同形则曲线效应为 0,属该模式的文档化语义)
+function attributionCurve() {
+  if (!curveRows.value.length) return []
+  if (marketCurveSnapshot != null &&
+      JSON.stringify(curveRows.value) === JSON.stringify(marketCurveSnapshot)) {
+    return []
+  }
+  return curveRows.value.map(r => ({ tenor: r.tenor, rate: r.rate }))
+}
+
 function errText(e) {
   const d = e?.response?.data?.detail
   if (typeof d === 'string') return d
@@ -297,6 +318,7 @@ async function onLoadMarket() {
   try {
     const m = await loadMarket(form.value.benchmark, form.value.valuationDate)
     curveRows.value = m.curve.map(x => ({ ...x }))
+    marketCurveSnapshot = JSON.parse(JSON.stringify(curveRows.value))
     fixingInfo.value = m.fixing
     marketApprox.value = m.calendar_approximate
     valueResult.value = null
@@ -326,7 +348,7 @@ async function onValue() {
 async function onAttribution() {
   loadingAttr.value = true
   try {
-    const p = { ...payload(), start_date: form.value.startDate }
+    const p = { ...payload(), start_date: form.value.startDate, curve: attributionCurve() }
     attributionResult.value = await postAttribution(p)
     warnings.value = attributionResult.value.warnings || []
     activeTab.value = 'attr'
