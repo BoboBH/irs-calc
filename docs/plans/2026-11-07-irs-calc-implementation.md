@@ -1552,6 +1552,23 @@ def test_build_calendar_from_fr007_fixing_dates():
     assert not cal.is_business_day(date(2026, 11, 7))  # 周六
     assert cal.uses_fallback(date(2027, 1, 1))       # 数据范围外
     assert not cal.uses_fallback(date(2026, 11, 6))
+
+
+def test_load_value_rows_bad_line_raises_with_location(tmp_path):
+    # path 参数是留的测试缝隙:合成坏行,断言 MarketDataError 带行号定位
+    p = tmp_path / "rate_value.csv"
+    p.write_text("sec_id\tdate\tvalue\n51,557\t2026-11-06\t1.4\n51,557\tbad-date\t1.4\n",
+                 encoding="utf-8")
+    with pytest.raises(MarketDataError, match="第3行"):
+        load_value_rows(p)
+
+
+def test_load_instruments_bad_column_raises(tmp_path):
+    p = tmp_path / "rate_info.csv"
+    p.write_text("sec_id\tname\tsec_code\tBMK_IDX\ttenor\n"
+                 "249,295\tname\tcode\tCNY-FR007\n", encoding="utf-8")
+    with pytest.raises(MarketDataError, match="第2行"):
+        load_instruments(p)
 ```
 
 - [ ] **Step 2: 运行确认失败**
@@ -1591,15 +1608,19 @@ class MarketDataError(ValueError):
 
 
 def load_value_rows(path: Path | None = None) -> dict[str, dict[date, float]]:
-    """返回 {sec_id: {date: rate小数}}。"""
+    """返回 {sec_id: {date: rate小数}}。无法解析的行抛 MarketDataError(含文件名与行号)。"""
     p = path or (DATA_DIR / "rate_value.csv")
     out: dict[str, dict[date, float]] = {}
     with open(p, encoding="utf-8-sig", newline="") as f:
         reader = csv.reader(f, delimiter="\t")
         next(reader)  # 表头
-        for sec_id, d, v in reader:
-            key = sec_id.strip()
-            out.setdefault(key, {})[date.fromisoformat(d)] = float(v) / 100.0
+        for n, row in enumerate(reader, start=2):
+            try:
+                sec_id, d, v = row
+                key = sec_id.strip()
+                out.setdefault(key, {})[date.fromisoformat(d)] = float(v) / 100.0
+            except ValueError as e:
+                raise MarketDataError(f"{p.name} 第{n}行无法解析: {row!r}({e})") from None
     return out
 
 
@@ -1610,7 +1631,11 @@ def load_instruments(path: Path | None = None) -> list[dict]:
     with open(p, encoding="utf-8-sig", newline="") as f:
         reader = csv.reader(f, delimiter="\t")
         next(reader)
-        for sec_id, name, sec_code, bmk, tenor in reader:
+        for n, row in enumerate(reader, start=2):
+            try:
+                sec_id, name, sec_code, bmk, tenor = row
+            except ValueError:
+                raise MarketDataError(f"{p.name} 第{n}行无法解析: {row!r}") from None
             out.append({"sec_id": sec_id.strip(), "name": name.strip(),
                         "sec_code": sec_code.strip(), "bmk": bmk.strip(),
                         "tenor": tenor.strip()})
