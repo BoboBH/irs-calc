@@ -2349,7 +2349,7 @@ _handler: logging.Handler | None = None
 
 
 class DailySizeRotatingHandler(RotatingFileHandler):
-    """按天滚动 + 超过 MAX_BYTES 立即滚动;后缀精确到秒防同日覆盖。"""
+    """按天滚动 + 超过 MAX_BYTES 立即滚动(大小滚动追加 .1/.2 序号);过期文件按日戳清理。"""
 
     def __init__(self, base_path: str):
         self.base_path = base_path
@@ -2383,7 +2383,7 @@ def setup_logging(level: int = logging.INFO) -> logging.Logger:
     global _handler
     logger = logging.getLogger("irs-calc")
     logger.setLevel(level)
-    if _handler is None:
+    if _handler is None:  # 全局只挂一个滚动 handler,避免并发滚动冲突
         os.makedirs(LOG_DIR, exist_ok=True)
         _handler = DailySizeRotatingHandler(os.path.join(LOG_DIR, "irs-calc.log"))
         _handler.setFormatter(logging.Formatter(
@@ -2392,6 +2392,8 @@ def setup_logging(level: int = logging.INFO) -> logging.Logger:
         logger.propagate = False
     return logger
 ```
+
+另新建 `backend/.gitignore`,内容 `logs/`(滚动文件名带日期后缀,根 `.gitignore` 的 `*.log` 匹配不到)。
 
 - [ ] **Step 4: 实现 schemas / services / market / main**
 
