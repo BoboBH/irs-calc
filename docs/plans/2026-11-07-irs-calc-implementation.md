@@ -429,7 +429,8 @@ def test_forward_flat_curve_equals_flat_rate():
     c = make_flat_curve(0.014)
     f = c.forward(date(2026, 9, 1), date(2026, 12, 1), 365)
     expected = 0.014 / (1 + 0.014 * 92 / 365)
-    assert f == expected
+    # DF 比值路径与闭式路径存在 ~1e-16 的浮点舍入差,不能要求位级相等
+    assert abs(f - expected) < 1e-15
 
 
 def test_shifted_parallel():
@@ -451,8 +452,9 @@ def test_shifted_keys_triangular_weights():
     tau_mid = (mid - VAL).days / 365
     tau_6m = (date(2026, 12, 1) - VAL).days / 365
     tau_1y = (date(2027, 6, 1) - VAL).days / 365
-    w = (tau_mid - tau_6m) / (tau_1y - tau_6m)  # 0.5
-    assert abs(shifted.zero_rate(mid) - (0.014 + 1e-4 * w)) < 1e-15
+    w = (tau_mid - tau_6m) / (tau_1y - tau_6m)  # 0.4945:τ 上距 6M 的比例(mid 非精确中点)
+    # 6M 的三角形权重随 τ 向 1Y 线性衰减:mid 距 6M 90 天/共 182 天 → 权重 = 1-w = 0.5055
+    assert abs(shifted.zero_rate(mid) - (0.014 + 1e-4 * (1 - w))) < 1e-15
     # 节点本身
     assert shifted.zero_rate(date(2026, 12, 1)) == 0.0141
     assert shifted.zero_rate(date(2027, 6, 1)) == 0.014
