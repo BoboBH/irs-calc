@@ -28,6 +28,9 @@ class ZeroCurve:
             raise ValueError("曲线至少需要一个期限点")
         if pts[0].date < valuation_date:
             raise ValueError("期限点日期不能早于估值日")
+        for a, b in zip(pts, pts[1:]):
+            if a.date == b.date:
+                raise ValueError(f"期限点日期重复: {b.date}")
         self.valuation_date = valuation_date
         self.points = pts
 
@@ -72,6 +75,9 @@ class ZeroCurve:
     def shifted_keys(self, key_dates: Sequence[date], bumps: Sequence[float]) -> "ZeroCurve":
         if len(key_dates) != len(bumps):
             raise ValueError("key_dates 与 bumps 长度不一致")
+        key_taus = [(kd - self.valuation_date).days / DAY_COUNT for kd in key_dates]
+        if any(a >= b for a, b in zip(key_taus, key_taus[1:])):
+            raise ValueError("key_dates 必须严格递增(按估值日起的 τ)")
         return self._shifted(key_dates, bumps)
 
     def zero_rate(self, d: date) -> float:

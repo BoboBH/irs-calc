@@ -92,3 +92,17 @@ def test_point_dates_and_labels():
     c = make_flat_curve()
     assert c.labels == ["6M", "1Y", "2Y"]
     assert c.point_dates[0] == date(2026, 12, 1)
+
+
+def test_shifted_keys_rejects_unsorted_key_dates():
+    import pytest
+    c = make_flat_curve()
+    with pytest.raises(ValueError):
+        c.shifted_keys([date(2028, 6, 1), date(2026, 12, 1)], [0.0, 1e-4])
+
+
+def test_constructor_rejects_duplicate_point_dates():
+    import pytest
+    with pytest.raises(ValueError):
+        ZeroCurve(VAL, [CurvePoint("6M", date(2026, 12, 1), 0.014),
+                        CurvePoint("6Mb", date(2026, 12, 1), 0.015)])
