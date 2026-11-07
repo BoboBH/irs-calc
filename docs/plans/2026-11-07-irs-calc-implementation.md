@@ -1508,7 +1508,10 @@ def test_load_value_rows_parses_comma_secid_and_percent():
 
 def test_load_instruments():
     ins = load_instruments()
-    fr = [i for i in ins if i["bmk"] == "CNY-FR007"]
+    # 品种表同一 BMK_IDX 下还含定盘行(51,557/tenor=7D、51,558/tenor=3M),
+    # 互换品种按 tenor ∈ swap_tenors 过滤
+    fr = [i for i in ins if i["bmk"] == "CNY-FR007"
+          and i["tenor"] in BENCHMARKS["FR007"].swap_tenors]
     assert len(fr) == 11
     assert any(i["tenor"] == "10Y" and i["sec_id"] == "249,305" for i in fr)
 
