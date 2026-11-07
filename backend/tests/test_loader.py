@@ -58,3 +58,20 @@ def test_build_calendar_from_fr007_fixing_dates():
     assert not cal.is_business_day(date(2026, 11, 7))  # 周六
     assert cal.uses_fallback(date(2027, 1, 1))       # 数据范围外
     assert not cal.uses_fallback(date(2026, 11, 6))
+
+
+def test_load_value_rows_bad_line_raises_with_location(tmp_path):
+    # path 参数是留的测试缝隙:合成坏行,断言 MarketDataError 带行号定位
+    p = tmp_path / "rate_value.csv"
+    p.write_text("sec_id\tdate\tvalue\n51,557\t2026-11-06\t1.4\n51,557\tbad-date\t1.4\n",
+                 encoding="utf-8")
+    with pytest.raises(MarketDataError, match="第3行"):
+        load_value_rows(p)
+
+
+def test_load_instruments_bad_column_raises(tmp_path):
+    p = tmp_path / "rate_info.csv"
+    p.write_text("sec_id\tname\tsec_code\tBMK_IDX\ttenor\n"
+                 "249,295\tname\tcode\tCNY-FR007\n", encoding="utf-8")
+    with pytest.raises(MarketDataError, match="第2行"):
+        load_instruments(p)

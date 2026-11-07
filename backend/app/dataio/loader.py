@@ -24,15 +24,19 @@ class MarketDataError(ValueError):
 
 
 def load_value_rows(path: Path | None = None) -> dict[str, dict[date, float]]:
-    """返回 {sec_id: {date: rate小数}}。"""
+    """返回 {sec_id: {date: rate小数}}。无法解析的行抛 MarketDataError(含文件名与行号)。"""
     p = path or (DATA_DIR / "rate_value.csv")
     out: dict[str, dict[date, float]] = {}
     with open(p, encoding="utf-8-sig", newline="") as f:
         reader = csv.reader(f, delimiter="\t")
         next(reader)  # 表头
-        for sec_id, d, v in reader:
-            key = sec_id.strip()
-            out.setdefault(key, {})[date.fromisoformat(d)] = float(v) / 100.0
+        for n, row in enumerate(reader, start=2):
+            try:
+                sec_id, d, v = row
+                key = sec_id.strip()
+                out.setdefault(key, {})[date.fromisoformat(d)] = float(v) / 100.0
+            except ValueError as e:
+                raise MarketDataError(f"{p.name} 第{n}行无法解析: {row!r}({e})") from None
     return out
 
 
@@ -43,7 +47,11 @@ def load_instruments(path: Path | None = None) -> list[dict]:
     with open(p, encoding="utf-8-sig", newline="") as f:
         reader = csv.reader(f, delimiter="\t")
         next(reader)
-        for sec_id, name, sec_code, bmk, tenor in reader:
+        for n, row in enumerate(reader, start=2):
+            try:
+                sec_id, name, sec_code, bmk, tenor = row
+            except ValueError:
+                raise MarketDataError(f"{p.name} 第{n}行无法解析: {row!r}") from None
             out.append({"sec_id": sec_id.strip(), "name": name.strip(),
                         "sec_code": sec_code.strip(), "bmk": bmk.strip(),
                         "tenor": tenor.strip()})
