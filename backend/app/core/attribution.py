@@ -12,7 +12,7 @@ from app.core.calendar import Calendar
 from app.core.conventions import BenchmarkSpec, tenor_to_months, year_fraction
 from app.core.curve import CurvePoint, ZeroCurve
 from app.core.pricing import _lookup_fixing, value_swap
-from app.core.risk import krdv01, key_tenors_for
+from app.core.risk import krdv01, key_tenors_for, parallel_dv01
 from app.core.schedule import add_months, build_floating_skeleton
 
 
@@ -30,13 +30,17 @@ class AttributionResult:
     spread: float
     residual: float
     detail: list[dict] = field(default_factory=list)
-    identity_ok: bool = False
-    identity_diff: float = 0.0
+    identity_ok: bool = False     # = 浮点恒等 + ΣKRDV01 机制校验 + 残差量级门(三者皆可失败)
+    identity_diff: float = 0.0    # 恒等式重加总的浮点噪声口径(构造上恒≈0,单独无信息量)
     warnings: list[str] = field(default_factory=list)
 
 
 def static_curve(curve_t0: ZeroCurve, valuation_t1: date) -> ZeroCurve:
-    """静态曲线 C̃_t1:各期限零息利率与 t0 相同,估值日推进至 t1。"""
+    """静态曲线 C̃_t1:各期限零息利率与 t0 相同,估值日推进至 t1。
+
+    假定期限点日期 = 估值日 + label 月数;传入不满足该假设的曲线时,
+    点日期按 label 月数重塑(label 为锚,constant maturity 口径)。
+    """
     pts = [CurvePoint(p.label, add_months(valuation_t1, tenor_to_months(p.label)), p.rate)
            for p in curve_t0.points]
     return ZeroCurve(valuation_t1, pts)
@@ -63,12 +67,19 @@ def run_attribution(*, trade: dict, start_date: date, end_date: date,
                     curve_t0: ZeroCurve, curve_t1: ZeroCurve,
                     fixings: dict[date, float], calendar: Calendar,
                     spec: BenchmarkSpec) -> AttributionResult:
-    omega = 1.0 if trade["direction"] == "receiver" else -1.0
+    if start_date >= end_date:
+        raise ValueError(f"归因窗口非法: start {start_date} >= end {end_date}")
+    eff = trade["effective_date"]
+    mat = trade["maturity_date"]
+    if end_date <= eff or start_date >= mat:
+        raise ValueError(f"归因窗口 [{start_date}, {end_date}] 与合约存续期 ({eff}, {mat}] 无交集")
     N = trade["notional"]
     s = trade.get("spread", 0.0)
 
-    # 1. 全价重估
-    npv_t0 = value_swap(trade, start_date, curve_t0, calendar, spec, fixings=fixings)["npv"]
+    # 1. 全价重估(omega 取自 value_swap,方向规则单点维护)
+    res0 = value_swap(trade, start_date, curve_t0, calendar, spec, fixings=fixings)
+    omega = res0["omega"]
+    npv_t0 = res0["npv"]
     npv_t1 = value_swap(trade, end_date, curve_t1, calendar, spec, fixings=fixings)["npv"]
 
     # 2. CF(t0,t1]:金额按实际定盘计(reset ≤ t1 均已知),取支付日 ∈ (t0, t1]
@@ -114,7 +125,7 @@ def run_attribution(*, trade: dict, start_date: date, end_date: date,
         detail.append({"tenor": x["tenor"], "dy_bp": dy_bp,
                        "krdv01": x["dv01"], "contribution": contribution})
 
-    # 7. 残差与勾稽
+    # 7. 残差与勾稽(identity_diff 仅为浮点噪声口径;可失败的子校验见下)
     spread = 0.0
     residual = delta_npv - theta - curve_effect - spread
     total = theta + curve_effect + spread + residual
@@ -122,10 +133,24 @@ def run_attribution(*, trade: dict, start_date: date, end_date: date,
     warnings = []
     if not keys:
         warnings.append("关键期限集合为空:剩余期限不足最小期限点,曲线效应为 0")
+    if keys and trade["maturity_date"] > keys[-1][1]:
+        warnings.append(f"到期日晚于最后关键期限点 {keys[-1][0]},"
+                        f"尾部敏感度折入该档(末档实为'{keys[-1][0]} 及以后')")
+    # 可失败的勾稽子校验:机制校验(ΣKRDV01 ≈ 平行 DV01,一阶性质)+ 残差量级门(ε 为二阶小量)
+    para = parallel_dv01(trade, end_date, st, calendar, spec,
+                         fixings=fixings, fixing_cutoff=start_date)
+    sum_kr = sum(x["dv01"] for x in parts)
+    mechanism_ok = abs(sum_kr - para) <= 1e-3 * max(abs(para), 1.0)
+    residual_ok = abs(residual) <= 0.05 * max(abs(delta_npv), abs(curve_effect), 1.0)
+    identity_ok = identity_diff < 1e-6 and mechanism_ok and residual_ok
+    if not mechanism_ok:
+        warnings.append("ΣKRDV01 与平行 DV01 相对偏差超 1e-3,曲线扰动机制可能接线错误")
+    if not residual_ok:
+        warnings.append("残差 ε 量级异常(超过 ΔNPV/Curve 的 5%),分解可能失真")
 
     return AttributionResult(
         delta_npv=delta_npv, cf=cf, npv_t0=npv_t0, npv_t1=npv_t1,
         npv_static=npv_static, theta=theta, carry=carry, roll=roll,
         curve_effect=curve_effect, spread=spread, residual=residual,
-        detail=detail, identity_ok=identity_diff < 1e-6,
+        detail=detail, identity_ok=identity_ok,
         identity_diff=identity_diff, warnings=warnings)

@@ -106,3 +106,22 @@ def test_constructor_rejects_duplicate_point_dates():
     with pytest.raises(ValueError):
         ZeroCurve(VAL, [CurvePoint("6M", date(2026, 12, 1), 0.014),
                         CurvePoint("6Mb", date(2026, 12, 1), 0.015)])
+
+
+def test_df_before_valuation_back_extrapolates():
+    """锚定日之前 DF 按同式反推(τ<0 → DF>1);静态归因曲线需要它。"""
+    c = make_flat_curve(0.014)
+    d = date(2026, 5, 25)  # VAL − 7 天
+    tau = (d - VAL).days / 365
+    expected = 1.0 / (1.0 + 0.014 * tau)
+    assert c.df(d) == expected
+    assert c.df(d) > 1.0
+
+
+def test_forward_straddling_valuation_flat_curve():
+    """跨锚定日的远期不受钳制影响:平缓曲线 F = y/(1+y·τ(d1)),d1 可早于锚定日。"""
+    c = make_flat_curve(0.014)
+    f = c.forward(date(2026, 5, 25), date(2026, 6, 1))
+    expected = 0.014 / (1 + 0.014 * (-7 / 365))
+    # 7 天 τ 的 (DF−1) 有灾难性抵消,ULP 噪声 ~1e-14,取 1e-12(仍远紧于 2e-3 级缺陷)
+    assert abs(f - expected) < 1e-12

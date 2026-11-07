@@ -98,8 +98,11 @@ class ZeroCurve:
 
     def df(self, d: date) -> float:
         tau = self._tau(d)
-        if tau <= 0:
+        if tau == 0:
             return 1.0
+        # τ<0(锚定日之前)按同式反推(DF>1):静态归因曲线(锚 t1)需对重置日
+        # < t1 的子区间算远期;钳制会系统性压低远期、虚增残差。zero_rate 的 τ≤0
+        # 平推保持不变,反推正好取首点利率。
         return 1.0 / (1.0 + self.zero_rate(d) * tau)
 
     def forward(self, d1: date, d2: date, day_count: int = DAY_COUNT) -> float:

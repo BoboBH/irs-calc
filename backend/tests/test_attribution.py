@@ -67,6 +67,9 @@ def test_attribution_identity_and_carry():
     assert abs(res.identity_diff) < 1e-6
     # 收固定 + 利率上行 → 曲线效应为负
     assert res.curve_effect < 0
+    # 残差应为二阶小量(评审 C1:独立于恒等式的量级断言);到期晚于末档 → 折入告警
+    assert abs(res.residual) <= 0.05 * max(abs(res.delta_npv), abs(res.curve_effect), 1.0)
+    assert any("折入" in w for w in res.warnings)
 
 
 def test_attribution_cf_counts_payment_in_window():
@@ -89,3 +92,47 @@ def test_attribution_cf_counts_payment_in_window():
     assert res.cf > 0
     assert res.delta_npv == pytest.approx(res.npv_t1 + res.cf - res.npv_t0)
     assert res.identity_ok
+
+
+def test_attribution_rejects_bad_window():
+    """start>=end 或窗口与存续期无交集 → ValueError(评审 I2:消除静默垃圾输出)。"""
+    spec = BENCHMARKS["FR007"]
+    kw = dict(trade=TRADE, curve_t0=curve_asof(VAL, 0.014),
+              curve_t1=curve_asof(T1, 0.015), fixings=FIXINGS, calendar=CAL, spec=spec)
+    try:
+        run_attribution(start_date=T1, end_date=VAL, **kw)
+        raise AssertionError("应当抛出 ValueError")
+    except ValueError:
+        pass
+    try:
+        run_attribution(start_date=date(2029, 1, 1), end_date=date(2029, 6, 1), **kw)
+        raise AssertionError("应当抛出 ValueError")
+    except ValueError:
+        pass
+
+
+def test_attribution_payer_mirrors_receiver():
+    """payer 与 receiver 的各分项精确反号(方向对称性钉住;IEEE 取负精确)。"""
+    spec = BENCHMARKS["FR007"]
+    recv = run_attribution(trade=TRADE, start_date=VAL, end_date=T1,
+                           curve_t0=curve_asof(VAL, 0.014), curve_t1=curve_asof(T1, 0.015),
+                           fixings=FIXINGS, calendar=CAL, spec=spec)
+    payer = run_attribution(trade=dict(TRADE, direction="payer"), start_date=VAL, end_date=T1,
+                            curve_t0=curve_asof(VAL, 0.014), curve_t1=curve_asof(T1, 0.015),
+                            fixings=FIXINGS, calendar=CAL, spec=spec)
+    assert payer.delta_npv == -recv.delta_npv
+    assert payer.cf == -recv.cf
+    assert payer.carry == -recv.carry
+    assert payer.curve_effect == -recv.curve_effect
+    assert payer.theta == -recv.theta
+    assert payer.identity_ok
+
+
+def test_attribution_warns_when_maturity_beyond_last_key():
+    """到期日晚于最后关键期限点 → 尾部敏感度折入末档的告警(评审 I1)。"""
+    spec = BENCHMARKS["FR007"]
+    res = run_attribution(trade=TRADE, start_date=VAL, end_date=T1,
+                          curve_t0=curve_asof(VAL, 0.014), curve_t1=curve_asof(T1, 0.015),
+                          fixings=FIXINGS, calendar=CAL, spec=spec)
+    # TRADE 到期 2028-06-01,最后关键期限 1Y(2027-06-08)→ 折入告警
+    assert any("折入" in w for w in res.warnings)
