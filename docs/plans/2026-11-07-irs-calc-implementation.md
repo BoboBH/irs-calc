@@ -2208,13 +2208,65 @@ Expected: 6 passed(3 旧 + 拒绝窗口/payer 对称/折入告警 3 新)。
 ```bash
 cd /d/git/irs-calc/backend && py -m pytest tests -v
 ```
-Expected: 全部通过(61 passed)。
+Expected: 全部通过(63 passed;含 Step 12 追加的 2 个 curve 钉测试)。
 
 - [ ] **Step 11: Commit**
 
 ```bash
 cd /d/git/irs-calc && git add backend && git commit -m "feat(core): Campisi 归因(Θ/Carry/Roll/Curve/ε)与勾稽校验"
 ```
+
+- [ ] **Step 12: 评审修复追加——curve.py 锚定日前 DF 反推(残差门实测暴露的裁定)**
+
+残差量级门在 CF 窗口情景(起息 06-05,t0=06-05,t1=09-08)实测暴露内核边界伪影:
+静态曲线锚定 t1、cutoff=t0 → 重置日 09-07(∈(t0,t1))的子区间走 C̃ 隐含远期,但
+`curve.py::df` 对 `tau <= 0` 钳制返回 1.0 → DF(09-07)=1.0,远期被系统性压低
+(0.014 → 0.0120),产生 −3822 元假残差(门 = 0.05·|ΔNPV| = 359.86)。周重置网格下
+真实归因窗口几乎必含此类子区间,属数据路径真缺陷。裁定:修内核(选项 2),不做
+断言弱化、不改 Θ 口径(定盘与远期之差按设计文档 §4.7 仍归 ε)。唯一受影响路径是
+归因静态曲线;正常定价 cutoff=估值日,重置日必晚于锚定日,从不触发。
+
+`backend/app/core/curve.py` 的 `df` 守卫改为仅 τ=0 返回 1.0,τ<0 按同式反推:
+```python
+    def df(self, d: date) -> float:
+        tau = self._tau(d)
+        if tau == 0:
+            return 1.0
+        # τ<0(锚定日之前)按同式反推(DF>1):静态归因曲线(锚 t1)需对重置日
+        # < t1 的子区间算远期;钳制会系统性压低远期、虚增残差。zero_rate 的 τ≤0
+        # 平推保持不变,反推正好取首点利率。
+        return 1.0 / (1.0 + self.zero_rate(d) * tau)
+```
+`zero_rate`/`forward`/构造器/扰动均不动。既有钉测试不受影响:τ=0 显式 1.0 保住
+`test_df_at_valuation_is_one`;正向 τ 路径数值不变;归因恒等/对称测试的重置日全
+≥ 锚定日,数值不变;`test_floating_fixing_cutoff_uses_forward_after_cutoff` 只断言
+source 与 `rate != 0.0136`,反推后仍成立。
+
+`backend/tests/test_curve.py` 追加 2 个钉测试:
+```python
+def test_df_before_valuation_back_extrapolates():
+    """锚定日之前 DF 按同式反推(τ<0 → DF>1);静态归因曲线需要它。"""
+    c = make_flat_curve(0.014)
+    d = date(2026, 5, 25)  # VAL − 7 天
+    tau = (d - VAL).days / 365
+    expected = 1.0 / (1.0 + 0.014 * tau)
+    assert c.df(d) == expected
+    assert c.df(d) > 1.0
+
+
+def test_forward_straddling_valuation_flat_curve():
+    """跨锚定日的远期不受钳制影响:平缓曲线 F = y/(1+y·τ(d1)),d1 可早于锚定日。"""
+    c = make_flat_curve(0.014)
+    f = c.forward(date(2026, 5, 25), date(2026, 6, 1))
+    expected = 0.014 / (1 + 0.014 * (-7 / 365))
+    # 7 天 τ 的 (DF−1) 有灾难性抵消,ULP 噪声 ~1e-14,取 1e-12(仍远紧于 2e-3 级缺陷)
+    assert abs(f - expected) < 1e-12
+```
+
+CF 窗口测试断言不改:`identity_ok` 恢复 True(残差从 −3822 回到 ~元级)。
+预期计数:`test_curve.py` 14 passed;`test_attribution.py` 6 passed;全量 63 passed。
+本追加与 Step 8 的归因修复同一提交,message:
+`fix(core): 归因修复轮——可失败勾稽子校验/尾部折入告警/窗口校验 + curve 锚定日前 DF 反推`
 
 ---
 
