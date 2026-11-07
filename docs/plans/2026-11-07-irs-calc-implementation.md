@@ -3565,3 +3565,9 @@ cd /d/git/irs-calc && git add -A && git commit -m "chore: 端到端验收通过"
 - M1:`_dist.exists()` 仅导入期求值一次——先启动后端、后构建 dist 时挂载不生效,需重启进程;建议加注释说明,可在跳过挂载时打一条 debug 日志(便于 Task 14 联调排查)
 - M2:`html=True` 只回退目录路径的 index.html,不是 SPA history 路由兜底(本项目前端无 vue-router、单视图,不受影响;若二期加路由/deep-link 需另加 catch-all fallback)
 - M3:可选——挂载成功时打一行日志含 dist 路径,便于部署核查(纯 observability)
+
+### Task 14(前端脚手架,复审 Approved 时遗留)
+- M1:vite.config.js dev server 未设 `host`——Vite 8 默认只绑 localhost(::1),浏览器走 http://127.0.0.1:5173 连不上;建议加 `host: '127.0.0.1'`(与 proxy target 一致;本机冒烟用 localhost 已绕过)
+- M2:proxy 简写未设 `changeOrigin: true`——后端现无 Host 校验,无实际影响;后端将来加 Host 校验/依赖 Host 逻辑会静默踩坑,建议显式对象写法
+- M3:index.html `lang="en"` 与 title=frontend——建议 `lang="zh-CN"`、正式产品名 title(读屏/翻译提示)
+- 衔接备注(给 Task 15/16):style.css 按计划留存但未被引入,无全局样式重置(body 默认 8px margin 仍在);Valuation.vue 自带布局样式,不要假定脚手架有 reset
