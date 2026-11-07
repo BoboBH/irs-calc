@@ -1392,7 +1392,8 @@ def test_krdv01_sums_to_parallel_dv01():
 def test_key_tenors_filtered_by_maturity():
     """2Y 互换只保留日期 ≤ 到期日的期限点。"""
     keys = key_tenors_for(curve_two_year(), date(2026, 12, 1))
-    assert keys == [date(2026, 7, 1), date(2026, 9, 1), date(2026, 12, 1)]
+    assert [d for _, d in keys] == [date(2026, 7, 1), date(2026, 9, 1), date(2026, 12, 1)]
+    assert [t for t, _ in keys] == ["1M", "3M", "6M"]
 ```
 
 - [ ] **Step 2: 运行确认失败**
@@ -1416,7 +1417,7 @@ from __future__ import annotations
 from datetime import date
 
 from app.core.calendar import Calendar
-from app.core.conventions import BenchmarkSpec, tenor_to_months
+from app.core.conventions import BenchmarkSpec
 from app.core.curve import ZeroCurve
 from app.core.pricing import value_swap
 
