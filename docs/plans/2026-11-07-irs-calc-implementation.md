@@ -872,8 +872,9 @@ def test_fixed_leg_two_periods():
     assert len(leg.rows) == 2
     df1 = 1 / (1 + 0.014 * 92 / 365)
     df2 = 1 / (1 + 0.014 * 183 / 365)  # 06-01 → 12-01 共 183 天
-    cf1 = N * K * 92 / 365
-    cf2 = N * K * 91 / 365
+    # 先算 τ 再乘,与实现 (notional * rate * year_fraction) 的运算次序一致,避免末位 ULP 差异
+    cf1 = N * K * (92 / 365)
+    cf2 = N * K * (91 / 365)
     assert leg.rows[0].amount == cf1
     assert leg.rows[0].df == df1
     assert leg.rows[0].pv == cf1 * df1
@@ -885,10 +886,11 @@ def test_fixed_leg_excludes_past_payments():
     """估值日在第二期期中 → 只剩第二期现金流。"""
     sk = build_fixed_skeleton(VAL, date(2026, 12, 1), 3, CAL)
     mid = date(2026, 10, 1)
-    curve_mid = ZeroCurve(mid, [CurvePoint("6M", date(2027, 4, 1), 0.014),
-                                CurvePoint("1Y", date(2027, 10, 1), 0.014),
-                                CurvePoint("2Y", date(2028, 10, 1), 0.014)])
-    leg = price_fixed_leg(sk, 100_000_000, 0.0165, mid, curve_mid, CAL, 365)
+    # 计划文本的潜在不一致:曲线锚定日必须与定价估值日一致,故此处锚定 mid
+    curve = ZeroCurve(mid, [CurvePoint("6M", date(2027, 4, 1), 0.014),
+                            CurvePoint("1Y", date(2027, 10, 1), 0.014),
+                            CurvePoint("2Y", date(2028, 10, 1), 0.014)])
+    leg = price_fixed_leg(sk, 100_000_000, 0.0165, mid, curve, CAL, 365)
     assert len(leg.rows) == 1
     assert leg.rows[0].pay_date == date(2026, 12, 1)
 
