@@ -53,6 +53,8 @@ def do_value(req: TradeRequest, calendar: Calendar) -> dict:
     curve = build_curve(req.benchmark, req.valuation_date, req.curve)
     fixings = load_fixings(req.benchmark, req.fixing_overrides)
     warnings = []
+    if not req.curve:
+        pass  # 曲线来自行情;坏点不清洗(用户决策),界面可改
     val = value_swap(trade, req.valuation_date, curve, calendar, spec, fixings=fixings)
     dv = risk.parallel_dv01(trade, req.valuation_date, curve, calendar, spec, fixings=fixings)
     keys = risk.key_tenors_for(curve, req.maturity_date)

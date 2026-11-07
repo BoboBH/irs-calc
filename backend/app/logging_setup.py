@@ -15,7 +15,7 @@ _handler: logging.Handler | None = None
 
 
 class DailySizeRotatingHandler(RotatingFileHandler):
-    """按天滚动 + 超过 MAX_BYTES 立即滚动;后缀精确到日,清理按 mtime 兜底。"""
+    """按天滚动 + 超过 MAX_BYTES 立即滚动(大小滚动追加 .1/.2 序号);过期文件按日戳清理。"""
 
     def __init__(self, base_path: str):
         self.base_path = base_path
