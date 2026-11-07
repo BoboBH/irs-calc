@@ -1379,14 +1379,18 @@ def test_parallel_dv01_receiver_negative():
 
 
 def test_krdv01_sums_to_parallel_dv01():
-    """白皮书性质:关键期限三角形权重扰动下 Σ KRDV01ₖ = 平行 DV01。"""
+    """白皮书性质(一阶):关键期限三角形权重扰动下 Σ KRDV01ₖ ≈ 平行 DV01。
+
+    有限差分重估含 O(bump²) 交叉凸性项(1bp 下相对残差 ~8.4e-5),
+    故用相对容差;结构性错误(漏期限/权重不归一)会产生 ≥1e-3 级相对差。
+    """
     spec = BENCHMARKS["FR007"]
     curve = curve_two_year()
     keys = key_tenors_for(curve, TRADE["maturity_date"])
     parts = krdv01(TRADE, VAL, curve, CAL, spec, fixings=FIXINGS, key_tenors=keys)
     total = sum(x["dv01"] for x in parts)
     dv = parallel_dv01(TRADE, VAL, curve, CAL, spec, fixings=FIXINGS)
-    assert abs(total - dv) < 1e-6
+    assert abs(total - dv) < 5e-4 * abs(dv)
 
 
 def test_key_tenors_filtered_by_maturity():
