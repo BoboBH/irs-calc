@@ -2545,15 +2545,19 @@ def do_value(req: TradeRequest, calendar: Calendar) -> dict:
     warnings = []
     if not req.curve:
         pass  # 曲线来自行情;坏点不清洗(用户决策),界面可改
-    prior = [d for d in fixings if d <= req.valuation_date]
-    if prior:
-        latest_fx = max(prior)
-        gap = (req.valuation_date - latest_fx).days
-        if gap > 7:  # FR007/SHIBOR3M 均为日频(交易日)定盘,>7 天视为陈旧(覆盖长假)
-            warnings.append(
-                f"定盘陈旧:最新定盘 {latest_fx.isoformat()} 距估值日 {gap} 天,浮动腿定价可能与市场偏离")
-    else:
-        warnings.append("估值日早于定盘序列起点,浮动腿利率主要来自曲线远期")
+    if req.effective_date <= req.valuation_date:
+        # 仅当浮动腿可能已取用定盘(首重置=起息日 ≤ 估值日)才查陈旧,
+        # 全远期(起息晚于估值日)不发告警;阈值 11 天:实测定盘序列最长间隔
+        # 10 天(春节/国庆 8-10 天),再大才是真陈旧
+        prior = [d for d in fixings if d <= req.valuation_date]
+        if prior:
+            latest_fx = max(prior)
+            gap = (req.valuation_date - latest_fx).days
+            if gap > 11:
+                warnings.append(
+                    f"定盘陈旧:最新定盘 {latest_fx.isoformat()} 距估值日 {gap} 天,浮动腿定价可能与市场偏离")
+        else:
+            warnings.append("估值日早于定盘序列起点,浮动腿利率主要来自曲线远期")
     val = value_swap(trade, req.valuation_date, curve, calendar, spec, fixings=fixings)
     dv = risk.parallel_dv01(trade, req.valuation_date, curve, calendar, spec, fixings=fixings)
     keys = risk.key_tenors_for(curve, req.maturity_date)
@@ -2805,6 +2809,35 @@ def test_attribution_bad_dates_422():
     req = {**VALUE_REQ, "start_date": "2026-06-08", "valuation_date": "2026-06-01"}
     r = client.post("/api/attribution", json=req)
     assert r.status_code == 422
+
+
+def test_attribution_market_curve_curve_component_nonzero():
+    """空曲线(自动从行情加载两日真实曲线)→ curve 分量非零、detail 非空。
+    装配层接线钉住:显式曲线模式下两日同形 curve≡0,curve_t0/t1 互换也能全绿,
+    必须用市场曲线模式钉装配。"""
+    req = {**VALUE_REQ, "curve": [],
+           "start_date": "2026-06-01", "valuation_date": "2026-11-06",
+           "effective_date": "2026-06-01", "maturity_date": "2028-06-01",
+           "fixing_overrides": {}}
+    r = client.post("/api/attribution", json=req)
+    assert r.status_code == 200
+    body = r.json()
+    assert body["components"]["curve"] != 0
+    assert len(body["detail"]) > 0
+
+
+def test_attribution_start_beyond_maturity_400():
+    """start 晚于到期日 → 内核窗口守卫 ValueError → 400(装配层错误映射钉住)。"""
+    req = {**VALUE_REQ, "start_date": "2026-12-15", "valuation_date": "2026-12-20"}
+    r = client.post("/api/attribution", json=req)
+    assert r.status_code == 400
+
+
+def test_attribution_valuation_beyond_maturity_400():
+    """估值日晚于到期日 → 400(与 /api/value 对称;此前会 200 产出已到期合约的归因)。"""
+    req = {**VALUE_REQ, "start_date": "2026-06-01", "valuation_date": "2027-01-10"}
+    r = client.post("/api/attribution", json=req)
+    assert r.status_code == 400
 ```
 
 - [ ] **Step 2: 运行确认失败**
@@ -2871,6 +2904,8 @@ def post_attribution(req: AttributionRequest):
         raise HTTPException(422, "归因起始日 t0 必须早于估值日 t1")
     if req.effective_date >= req.maturity_date:
         raise HTTPException(400, "起息日必须早于到期日")
+    if req.valuation_date > req.maturity_date:
+        raise HTTPException(400, "估值日不能晚于到期日")
     calendar = get_calendar()
     try:
         return do_attribution(req, calendar)
@@ -2897,7 +2932,7 @@ app.include_router(attribution_router)
 ```bash
 cd /d/git/irs-calc/backend && py -m pytest tests/test_api.py -v
 ```
-Expected: 11 passed(5 旧 + 6 新:估值 4 + 归因 2)。
+Expected: 14 passed(5 旧 + 9 新:估值 4 + 归因 5)。
 
 - [ ] **Step 5: 全量回归**
 
@@ -2911,6 +2946,8 @@ Expected: 全部通过。
 ```bash
 cd /d/git/irs-calc && git add backend && git commit -m "feat(api): 估值与归因接口"
 ```
+
+预期全量:77 passed(68 基线 + 9 新)。
 
 Task 11 质量评审移交事项(第 1/2/3 条已并入上方 Step 1 测试与 Step 3 代码;第 4 条缓存为可选项,体量小暂不做):
 
@@ -3516,3 +3553,7 @@ cd /d/git/irs-calc && git add -A && git commit -m "chore: 端到端验收通过"
 - M11:setup_logging 在 import 期执行,可改 FastAPI lifespan(现状无害)
 - M12:每请求 CSV 解析 3-5 次,延迟敏感时按 mtime 缓存
 - 设计取舍(Task 12 实现轮实测):归因窗口含新重置且真实定盘偏离静态远期时,一阶楔子按白皮书 §4.7 口径进 ε(实测 1.04bp 楔子 ≈ −191 元/亿),残差门 5%·max(|ΔNPV|,|Curve|,1) 会如实报 identity_ok=False——门分母加 N 比例项、或 ε 显式分离"定盘效应"分量为二期候选;Task 16 验收选窗口时留意(1 日窗口大多不含重置)
+- M-3:`if not req.curve: pass` 死代码(裁定保留以存"坏点不清洗"决策注记)
+- M-4:attribution start≥valuation 用 422、其余参数错 400,状态码风格不一(422 应只留 pydantic 层);test_attribution_bad_dates_422 已钉 422,改动需连测试
+- M-5:两路由 except 链复制,第三路由出现时应上收为全局 exception_handler
+- M-6:test_value_bad_tenor_400 未断 detail 文案;503 路径无测试(monkeypatch loader 可行)
