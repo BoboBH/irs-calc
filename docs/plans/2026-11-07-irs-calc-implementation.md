@@ -10,7 +10,7 @@
 
 **设计文档:** `docs/specs/2026-11-07-irs-calc-design.md`(口径以它为准)
 
-**运行约定:** 后端一律用 `py -m pytest` / `py -m uvicorn`(本机 `python` 命令指向商店占位程序,不可用);Windows Git Bash 环境;PYTHONIOENCODING=utf-8 防中文乱码。
+**运行约定:** 后端一律用项目 venv 解释器 `backend/.venv/Scripts/python.exe -m pytest` / `-m uvicorn`(下文各命令中的 `py -m pytest` 等均按此执行;本机 `python` 是商店占位程序,全局环境禁止装包);Windows Git Bash 环境;PYTHONIOENCODING=utf-8 防中文乱码。
 
 ---
 
