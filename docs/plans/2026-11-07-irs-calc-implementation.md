@@ -904,6 +904,17 @@ def test_pricing_error_when_curve_before_valuation():
         raise AssertionError("应当抛出 ValueError")
     except ValueError:
         pass
+
+
+def test_fixed_leg_pay_on_valuation_excluded():
+    """ex-coupon 严格边界:支付日 = 估值日的现金流被剔除(该笔进归因 CF 项)。"""
+    sk = build_fixed_skeleton(VAL, date(2026, 12, 1), 3, CAL)
+    v = date(2026, 9, 1)
+    curve_v = ZeroCurve(v, [CurvePoint("6M", date(2027, 3, 1), 0.014),
+                            CurvePoint("1Y", date(2027, 9, 1), 0.014),
+                            CurvePoint("2Y", date(2028, 9, 1), 0.014)])
+    leg = price_fixed_leg(sk, 100_000_000, 0.0165, v, curve_v, CAL, 365)
+    assert [r.pay_date for r in leg.rows] == [date(2026, 12, 1)]
 ```
 
 - [ ] **Step 2: 运行确认失败**
