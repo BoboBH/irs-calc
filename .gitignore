@@ -4,3 +4,4 @@ node_modules/
 dist/
 .venv/
 *.log
+.claude/scheduled_tasks.lock
