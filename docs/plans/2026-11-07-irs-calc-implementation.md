@@ -2264,7 +2264,7 @@ def test_forward_straddling_valuation_flat_curve():
 ```
 
 CF 窗口测试断言不改:`identity_ok` 恢复 True(残差从 −3822 回到 ~元级)。
-预期计数:`test_curve.py` 14 passed;`test_attribution.py` 6 passed;全量 63 passed。
+预期计数:`test_curve.py` 13 passed(既有 11 + 新增 2);`test_attribution.py` 6 passed;全量 63 passed。
 本追加与 Step 8 的归因修复同一提交,message:
 `fix(core): 归因修复轮——可失败勾稽子校验/尾部折入告警/窗口校验 + curve 锚定日前 DF 反推`
 
