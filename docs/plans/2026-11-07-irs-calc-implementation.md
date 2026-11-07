@@ -464,6 +464,20 @@ def test_point_dates_and_labels():
     c = make_flat_curve()
     assert c.labels == ["6M", "1Y", "2Y"]
     assert c.point_dates[0] == date(2026, 12, 1)
+
+
+def test_shifted_keys_rejects_unsorted_key_dates():
+    import pytest
+    c = make_flat_curve()
+    with pytest.raises(ValueError):
+        c.shifted_keys([date(2028, 6, 1), date(2026, 12, 1)], [0.0, 1e-4])
+
+
+def test_constructor_rejects_duplicate_point_dates():
+    import pytest
+    with pytest.raises(ValueError):
+        ZeroCurve(VAL, [CurvePoint("6M", date(2026, 12, 1), 0.014),
+                        CurvePoint("6Mb", date(2026, 12, 1), 0.015)])
 ```
 
 - [ ] **Step 2: 运行确认失败**
@@ -507,6 +521,9 @@ class ZeroCurve:
             raise ValueError("曲线至少需要一个期限点")
         if pts[0].date < valuation_date:
             raise ValueError("期限点日期不能早于估值日")
+        for a, b in zip(pts, pts[1:]):
+            if a.date == b.date:
+                raise ValueError(f"期限点日期重复: {b.date}")
         self.valuation_date = valuation_date
         self.points = pts
 
@@ -551,6 +568,9 @@ class ZeroCurve:
     def shifted_keys(self, key_dates: Sequence[date], bumps: Sequence[float]) -> "ZeroCurve":
         if len(key_dates) != len(bumps):
             raise ValueError("key_dates 与 bumps 长度不一致")
+        key_taus = [(kd - self.valuation_date).days / DAY_COUNT for kd in key_dates]
+        if any(a >= b for a, b in zip(key_taus, key_taus[1:])):
+            raise ValueError("key_dates 必须严格递增(按估值日起的 τ)")
         return self._shifted(key_dates, bumps)
 
     def zero_rate(self, d: date) -> float:
@@ -587,7 +607,7 @@ class ZeroCurve:
 ```bash
 cd /d/git/irs-calc/backend && py -m pytest tests/test_curve.py -v
 ```
-Expected: 9 passed。
+Expected: 11 passed。
 
 - [ ] **Step 5: Commit**
 
