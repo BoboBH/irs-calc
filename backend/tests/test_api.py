@@ -32,3 +32,15 @@ def test_market_missing_date_404():
 def test_market_bad_benchmark_422():
     r = client.get("/api/market", params={"benchmark": "SOFR", "date": "2026-11-06"})
     assert r.status_code == 422
+
+
+def test_market_transition_period_fixing_none_and_calendar_approximate():
+    """换算期(曲线已有、FR007 定盘 2025-01-02 才开始):fixing=None + 日历回退标志。
+
+    钉住"最新 ≤ date"取法与 calendar_approximate;换算期真实边界,数据刷新即碎(同其余快照测试)。
+    """
+    r = client.get("/api/market", params={"benchmark": "FR007", "date": "2024-12-02"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["fixing"] is None
+    assert body["calendar_approximate"] is True

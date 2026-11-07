@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 import os
 import glob
+import re
 from datetime import datetime, timedelta
 from logging.handlers import RotatingFileHandler
 
@@ -21,15 +22,17 @@ class DailySizeRotatingHandler(RotatingFileHandler):
         self.base_path = base_path
         stamp = datetime.now().strftime("%Y%m%d")
         super().__init__(f"{base_path}.{stamp}", maxBytes=MAX_BYTES,
-                         backupCount=KEEP_DAYS * 50, encoding="utf-8")
+                         backupCount=KEEP_DAYS * 50, encoding="utf-8", delay=True)
         self.day_stamp = stamp
 
     def emit(self, record: logging.LogRecord) -> None:
         today = datetime.now().strftime("%Y%m%d")
         if today != self.day_stamp:  # 跨天:换新文件并清理过期
             self.day_stamp = today
+            if self.stream is not None:  # 显式关旧流,Windows 释放句柄便于清理
+                self.stream.close()
+                self.stream = None
             self.baseFilename = os.path.abspath(f"{self.base_path}.{today}")
-            self.stream = None
             if self.backupCount > 0:
                 self._cleanup_expired()
         super().emit(record)
@@ -37,8 +40,10 @@ class DailySizeRotatingHandler(RotatingFileHandler):
     def _cleanup_expired(self) -> None:
         cutoff = (datetime.now() - timedelta(days=KEEP_DAYS)).strftime("%Y%m%d")
         for f in glob.glob(f"{self.base_path}.*"):
-            stamp = f.rsplit(".", 1)[-1]
-            if stamp[:8] < cutoff:
+            # 文件名形如 base.YYYYMMDD 或 base.YYYYMMDD.N(大小滚动序号):
+            # 只删带 8 位日戳且早于 cutoff 的,杂散文件不动
+            m = re.search(r"\.(\d{8})(?:\.\d+)?$", os.path.basename(f))
+            if m and m.group(1) < cutoff:
                 try:
                     os.remove(f)
                 except OSError:

@@ -18,10 +18,10 @@ def get_calendar() -> Calendar:
     return loader.build_calendar()
 
 
-def load_fixings(benchmark: str, overrides: dict[str, float] | None = None) -> dict[date, float]:
+def load_fixings(benchmark: str, overrides: dict[date, float] | None = None) -> dict[date, float]:
     fx = dict(loader.fixings_for(benchmark))
     for d, v in (overrides or {}).items():
-        fx[date.fromisoformat(d)] = v / 100.0
+        fx[d] = v / 100.0
     return fx
 
 

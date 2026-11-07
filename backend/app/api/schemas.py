@@ -31,7 +31,7 @@ class TradeRequest(BaseModel):
     fixed_freq_months: int = Field(default=3, ge=1, le=12)
     valuation_date: date
     curve: list[CurvePointIn] = []     # 空 = 按估值日自动从行情加载
-    fixing_overrides: dict[str, float] = {}  # {"2026-11-05": 1.37}(%)
+    fixing_overrides: dict[date, float] = {}  # {"2026-11-05": 1.37}(%);ISO 串自动转 date,坏串 422
 
 
 class AttributionRequest(TradeRequest):
