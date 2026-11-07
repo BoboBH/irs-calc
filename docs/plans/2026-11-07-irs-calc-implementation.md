@@ -1319,7 +1319,7 @@ from app.core.schedule import build_fixed_skeleton, build_floating_skeleton, Sch
 ```bash
 cd /d/git/irs-calc/backend && py -m pytest tests/test_pricing.py -v
 ```
-Expected: 11 passed。
+Expected: 12 passed(9 旧 + 3 新;全量套件 39 passed)。
 
 - [ ] **Step 5: Commit**
 
