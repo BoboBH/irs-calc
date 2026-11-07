@@ -885,7 +885,10 @@ def test_fixed_leg_excludes_past_payments():
     """估值日在第二期期中 → 只剩第二期现金流。"""
     sk = build_fixed_skeleton(VAL, date(2026, 12, 1), 3, CAL)
     mid = date(2026, 10, 1)
-    leg = price_fixed_leg(sk, 100_000_000, 0.0165, mid, flat_curve(), CAL, 365)
+    curve_mid = ZeroCurve(mid, [CurvePoint("6M", date(2027, 4, 1), 0.014),
+                                CurvePoint("1Y", date(2027, 10, 1), 0.014),
+                                CurvePoint("2Y", date(2028, 10, 1), 0.014)])
+    leg = price_fixed_leg(sk, 100_000_000, 0.0165, mid, curve_mid, CAL, 365)
     assert len(leg.rows) == 1
     assert leg.rows[0].pay_date == date(2026, 12, 1)
 
