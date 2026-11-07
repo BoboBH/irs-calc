@@ -21,27 +21,35 @@ def key_tenors_for(curve: ZeroCurve, maturity: date) -> list[tuple[str, date]]:
 
 
 def _npv_with_curve(trade: dict, valuation: date, curve: ZeroCurve, calendar: Calendar,
-                    spec: BenchmarkSpec, fixings: dict[date, float]) -> float:
-    return value_swap(trade, valuation, curve, calendar, spec, fixings=fixings)["npv"]
+                    spec: BenchmarkSpec, fixings: dict[date, float],
+                    fixing_cutoff: date | None = None) -> float:
+    return value_swap(trade, valuation, curve, calendar, spec, fixings=fixings,
+                      fixing_cutoff=fixing_cutoff)["npv"]
 
 
 def parallel_dv01(trade: dict, valuation: date, curve: ZeroCurve, calendar: Calendar,
-                  spec: BenchmarkSpec, *, fixings: dict[date, float]) -> float:
+                  spec: BenchmarkSpec, *, fixings: dict[date, float],
+                  fixing_cutoff: date | None = None) -> float:
     bumped = curve.shifted_parallel(BUMP)
-    return _npv_with_curve(trade, valuation, bumped, calendar, spec, fixings) \
-        - _npv_with_curve(trade, valuation, curve, calendar, spec, fixings)
+    return _npv_with_curve(trade, valuation, bumped, calendar, spec, fixings,
+                           fixing_cutoff) \
+        - _npv_with_curve(trade, valuation, curve, calendar, spec, fixings,
+                          fixing_cutoff)
 
 
 def krdv01(trade: dict, valuation: date, curve: ZeroCurve, calendar: Calendar,
            spec: BenchmarkSpec, *, fixings: dict[date, float],
-           key_tenors: list[tuple[str, date]]) -> list[dict]:
-    base = _npv_with_curve(trade, valuation, curve, calendar, spec, fixings)
+           key_tenors: list[tuple[str, date]],
+           fixing_cutoff: date | None = None) -> list[dict]:
+    base = _npv_with_curve(trade, valuation, curve, calendar, spec, fixings,
+                           fixing_cutoff)
     key_dates = [d for _, d in key_tenors]
     out = []
     for i, (label, kd) in enumerate(key_tenors):
         bumps = [0.0] * len(key_dates)
         bumps[i] = BUMP
         bumped = curve.shifted_keys(key_dates, bumps)
-        npv_b = _npv_with_curve(trade, valuation, bumped, calendar, spec, fixings)
+        npv_b = _npv_with_curve(trade, valuation, bumped, calendar, spec, fixings,
+                                fixing_cutoff)
         out.append({"tenor": label, "date": kd, "dv01": npv_b - base})
     return out

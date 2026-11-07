@@ -205,3 +205,54 @@ def test_par_swap_npv_near_zero():
     par = dict(TRADE, fixed_rate=k_star)
     res = value_swap(par, VAL, curve, CAL, spec, fixings=fixings)
     assert abs(res["npv"]) < 1e-4
+
+
+def test_floating_fixing_cutoff_uses_forward_after_cutoff():
+    """静态曲线情景:估值日 06-20、cutoff=06-01 → reset 06-01 用定盘,06-08 起走远期。"""
+    spec = BENCHMARKS["FR007"]
+    sk = build_floating_skeleton(VAL, date(2026, 12, 1), CAL, spec)
+    mid = date(2026, 6, 20)
+    curve_mid = ZeroCurve(mid, [CurvePoint("6M", date(2026, 12, 1), 0.014),
+                                CurvePoint("1Y", date(2027, 6, 1), 0.014),
+                                CurvePoint("2Y", date(2028, 6, 1), 0.014)])
+    fixings = {date(2026, 6, 1): 0.0135, date(2026, 6, 8): 0.0136}
+    leg = price_floating_leg(sk, 100_000_000, mid, curve_mid, spec,
+                             fixings=fixings, spread=0.0, fixing_cutoff=date(2026, 6, 1))
+    subs = leg.rows[0].sub_periods
+    assert subs[0].source == "fixing"
+    assert subs[1].source == "forward"      # cutoff 之后不看真实定盘
+    assert subs[1].rate != 0.0136
+
+
+def test_min_pay_date_window_for_cf():
+    """min_pay_date=t0、估值日=t1:返回支付日 > t0 的现金流(归因 CF 窗口用)。"""
+    sk = build_fixed_skeleton(VAL, date(2026, 12, 1), 3, CAL)
+    t1 = date(2026, 9, 15)
+    curve_t1 = ZeroCurve(t1, [CurvePoint("6M", date(2026, 12, 1), 0.014),
+                              CurvePoint("1Y", date(2027, 6, 1), 0.014),
+                              CurvePoint("2Y", date(2028, 6, 1), 0.014)])
+    leg = price_fixed_leg(sk, 100_000_000, 0.0165, t1, curve_t1, CAL, 365,
+                          min_pay_date=date(2026, 9, 1))
+    assert [r.pay_date for r in leg.rows] == [date(2026, 12, 1)]
+
+
+def test_value_swap_rejects_bad_direction():
+    """direction 非 receiver/payer 时抛 ValueError(Task 7 评审骑乘:消除静默反号)。"""
+    bad = dict(TRADE, direction="Receiver")
+    try:
+        value_swap(bad, VAL, flat_curve(), CAL, BENCHMARKS["FR007"],
+                   fixings={date(2026, 6, 1): 0.014})
+        raise AssertionError("应当抛出 ValueError")
+    except ValueError:
+        pass
+
+
+def test_value_swap_defaults_spread_and_freq():
+    """缺省 spread=0、fixed_freq 缺省取 spec.fixed_freq_months,与显式传值一致。"""
+    minimal = dict(TRADE)
+    del minimal["spread"], minimal["fixed_freq_months"]
+    res_default = value_swap(minimal, VAL, flat_curve(), CAL, BENCHMARKS["FR007"],
+                             fixings={date(2026, 6, 1): 0.014})
+    res_full = value_swap(TRADE, VAL, flat_curve(), CAL, BENCHMARKS["FR007"],
+                          fixings={date(2026, 6, 1): 0.014})
+    assert res_default["npv"] == res_full["npv"]
