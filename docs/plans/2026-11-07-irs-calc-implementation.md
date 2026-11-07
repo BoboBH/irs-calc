@@ -251,8 +251,8 @@ cd /d/git/irs-calc && git add backend && git commit -m "feat(core): 基准惯例
 from datetime import date
 from app.core.calendar import Calendar
 
-# 用一小段手工构造的交易日:2026-05-25(一)~ 2026-06-05(五)全部是交易日
-BD = {date(2026, 5, d) for d in range(25, 32)} | {date(2026, 6, d) for d in range(1, 6)}
+# 用一小段手工构造的交易日:2026-05-25(一)~05-29(五)+ 2026-06-01(一)~06-05(五)
+BD = {date(2026, 5, d) for d in range(25, 30)} | {date(2026, 6, d) for d in range(1, 6)}
 
 
 def test_in_range_business_day():
