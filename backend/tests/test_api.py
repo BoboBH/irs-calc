@@ -145,3 +145,32 @@ def test_attribution_bad_dates_422():
     req = {**VALUE_REQ, "start_date": "2026-06-08", "valuation_date": "2026-06-01"}
     r = client.post("/api/attribution", json=req)
     assert r.status_code == 422
+
+
+def test_attribution_market_curve_curve_component_nonzero():
+    """空曲线(自动从行情加载两日真实曲线)→ curve 分量非零、detail 非空。
+    装配层接线钉住:显式曲线模式下两日同形 curve≡0,curve_t0/t1 互换也能全绿,
+    必须用市场曲线模式钉装配。"""
+    req = {**VALUE_REQ, "curve": [],
+           "start_date": "2026-06-01", "valuation_date": "2026-11-06",
+           "effective_date": "2026-06-01", "maturity_date": "2028-06-01",
+           "fixing_overrides": {}}
+    r = client.post("/api/attribution", json=req)
+    assert r.status_code == 200
+    body = r.json()
+    assert body["components"]["curve"] != 0
+    assert len(body["detail"]) > 0
+
+
+def test_attribution_start_beyond_maturity_400():
+    """start 晚于到期日 → 内核窗口守卫 ValueError → 400(装配层错误映射钉住)。"""
+    req = {**VALUE_REQ, "start_date": "2026-12-15", "valuation_date": "2026-12-20"}
+    r = client.post("/api/attribution", json=req)
+    assert r.status_code == 400
+
+
+def test_attribution_valuation_beyond_maturity_400():
+    """估值日晚于到期日 → 400(与 /api/value 对称;此前会 200 产出已到期合约的归因)。"""
+    req = {**VALUE_REQ, "start_date": "2026-06-01", "valuation_date": "2027-01-10"}
+    r = client.post("/api/attribution", json=req)
+    assert r.status_code == 400

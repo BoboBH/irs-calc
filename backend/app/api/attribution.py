@@ -17,6 +17,8 @@ def post_attribution(req: AttributionRequest):
         raise HTTPException(422, "归因起始日 t0 必须早于估值日 t1")
     if req.effective_date >= req.maturity_date:
         raise HTTPException(400, "起息日必须早于到期日")
+    if req.valuation_date > req.maturity_date:
+        raise HTTPException(400, "估值日不能晚于到期日")
     calendar = get_calendar()
     try:
         return do_attribution(req, calendar)
