@@ -55,6 +55,15 @@ def do_value(req: TradeRequest, calendar: Calendar) -> dict:
     warnings = []
     if not req.curve:
         pass  # 曲线来自行情;坏点不清洗(用户决策),界面可改
+    prior = [d for d in fixings if d <= req.valuation_date]
+    if prior:
+        latest_fx = max(prior)
+        gap = (req.valuation_date - latest_fx).days
+        if gap > 7:  # FR007/SHIBOR3M 均为日频(交易日)定盘,>7 天视为陈旧(覆盖长假)
+            warnings.append(
+                f"定盘陈旧:最新定盘 {latest_fx.isoformat()} 距估值日 {gap} 天,浮动腿定价可能与市场偏离")
+    else:
+        warnings.append("估值日早于定盘序列起点,浮动腿利率主要来自曲线远期")
     val = value_swap(trade, req.valuation_date, curve, calendar, spec, fixings=fixings)
     dv = risk.parallel_dv01(trade, req.valuation_date, curve, calendar, spec, fixings=fixings)
     keys = risk.key_tenors_for(curve, req.maturity_date)
