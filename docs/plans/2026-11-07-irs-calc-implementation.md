@@ -1081,10 +1081,10 @@ def test_floating_fr007_spread_added_on_period_tau():
     sk = build_floating_skeleton(VAL, date(2026, 12, 1), CAL, spec)
     leg = price_floating_leg(sk, 100_000_000, VAL, flat_curve(),
                              spec, fixings={date(2026, 6, 1): 0.014}, spread=0.0005)
-    base = leg.rows[0].amount
-    with_spread = price_floating_leg(sk, 100_000_000, VAL, flat_curve(),
-                                     spec, fixings={date(2026, 6, 1): 0.014},
-                                     spread=0.0005).rows[0].amount
+    base = price_floating_leg(sk, 100_000_000, VAL, flat_curve(),
+                              spec, fixings={date(2026, 6, 1): 0.014},
+                              spread=0.0).rows[0].amount
+    with_spread = leg.rows[0].amount
     # 利差 × 整季 τ(92/365)
     assert abs((with_spread - base) - 100_000_000 * 0.0005 * 92 / 365) < 1e-6
 
