@@ -2545,6 +2545,15 @@ def do_value(req: TradeRequest, calendar: Calendar) -> dict:
     warnings = []
     if not req.curve:
         pass  # 曲线来自行情;坏点不清洗(用户决策),界面可改
+    prior = [d for d in fixings if d <= req.valuation_date]
+    if prior:
+        latest_fx = max(prior)
+        gap = (req.valuation_date - latest_fx).days
+        if gap > 7:  # FR007/SHIBOR3M 均为日频(交易日)定盘,>7 天视为陈旧(覆盖长假)
+            warnings.append(
+                f"定盘陈旧:最新定盘 {latest_fx.isoformat()} 距估值日 {gap} 天,浮动腿定价可能与市场偏离")
+    else:
+        warnings.append("估值日早于定盘序列起点,浮动腿利率主要来自曲线远期")
     val = value_swap(trade, req.valuation_date, curve, calendar, spec, fixings=fixings)
     dv = risk.parallel_dv01(trade, req.valuation_date, curve, calendar, spec, fixings=fixings)
     keys = risk.key_tenors_for(curve, req.maturity_date)
@@ -2749,6 +2758,27 @@ def test_value_missing_fixing_422():
     assert "定盘" in r.json()["detail"]
 
 
+def test_value_stale_fixing_warning():
+    """估值日晚于定盘序列末尾(真实数据止于 2026-11-06)→ warnings 含定盘陈旧告警
+    (Task 11 移交项 1:warnings 不得恒空)。"""
+    req = {**VALUE_REQ, "valuation_date": "2026-12-01"}
+    r = client.post("/api/value", json=req)
+    assert r.status_code == 200
+    body = r.json()
+    assert any("定盘陈旧" in w for w in body["warnings"])
+    assert body["npv"] != 0
+
+
+def test_value_bad_tenor_400():
+    """显式曲线含非法 tenor("3Q")→ 400 字段级错误,不得 500(Task 11 移交项 2)。"""
+    req = {**VALUE_REQ, "curve": [{"tenor": "3Q", "rate": 1.4},
+                                  {"tenor": "6M", "rate": 1.4},
+                                  {"tenor": "1Y", "rate": 1.4},
+                                  {"tenor": "2Y", "rate": 1.4}]}
+    r = client.post("/api/value", json=req)
+    assert r.status_code == 400
+
+
 def test_attribution_identity_ok():
     req = {**VALUE_REQ,
            "start_date": "2026-06-01", "valuation_date": "2026-06-08",
@@ -2805,6 +2835,10 @@ def post_value(req: TradeRequest):
         raise HTTPException(422, f"缺少定盘利率: {e}。请在 fixing_overrides 中提供。")
     except MarketDataError as e:
         raise HTTPException(404, str(e))
+    except ValueError as e:  # 坏 tenor(tenor_to_months/ZeroCurve 重复点)等参数级错误
+        raise HTTPException(400, f"参数错误: {e}")
+    except OSError as e:  # data/*.csv 缺失(Task 11 移交项 3)
+        raise HTTPException(503, f"行情数据不可用: {e}")
 ```
 
 `backend/app/api/attribution.py`:
@@ -2835,6 +2869,10 @@ def post_attribution(req: AttributionRequest):
         raise HTTPException(422, f"缺少定盘利率: {e}。请在 fixing_overrides 中提供。")
     except MarketDataError as e:
         raise HTTPException(404, str(e))
+    except ValueError as e:  # 内核窗口守卫/坏 tenor 等参数级错误
+        raise HTTPException(400, f"参数错误: {e}")
+    except OSError as e:  # data/*.csv 缺失
+        raise HTTPException(503, f"行情数据不可用: {e}")
 ```
 
 `backend/app/main.py` 注册路由(import 区追加):
@@ -2850,7 +2888,7 @@ app.include_router(attribution_router)
 ```bash
 cd /d/git/irs-calc/backend && py -m pytest tests/test_api.py -v
 ```
-Expected: 10 passed(5 旧 + 5 新)。
+Expected: 11 passed(5 旧 + 6 新:估值 4 + 归因 2)。
 
 - [ ] **Step 5: 全量回归**
 
@@ -2865,7 +2903,7 @@ Expected: 全部通过。
 cd /d/git/irs-calc && git add backend && git commit -m "feat(api): 估值与归因接口"
 ```
 
-Task 11 质量评审移交事项(实现 Task 12 时必须处理,勿重蹈 "warnings 恒空"):
+Task 11 质量评审移交事项(第 1/2/3 条已并入上方 Step 1 测试与 Step 3 代码;第 4 条缓存为可选项,体量小暂不做):
 
 1. **定盘新鲜度告警**:`do_value` 的 `warnings` 目前恒空(pricing `_lookup_fixing` docstring 明文把时效性委托上层)。Task 12 须落地:估值日无当日定盘、或所用定盘明显陈旧时,往 warnings 写中文告警。
 2. **坏 tenor 映射**:用户显式 curve 中 tenor 串非法(`tenor_to_months` 抛 ValueError)或重复(`ZeroCurve` 抛 ValueError)→ 路由层映射 4xx 字段级错误,不得 500。
