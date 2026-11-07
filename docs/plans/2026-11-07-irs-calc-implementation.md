@@ -3381,3 +3381,56 @@ cd /d/git/irs-calc && git add -A && git commit -m "chore: 端到端验收通过"
 3. **类型一致性**:`price_floating_leg`/`value_swap`/`krdv01` 在 Task 10 的扩展签名已回写 Task 8 调用处兼容(新增参数均带默认值);`AttributionResult.detail` 字段名 `{tenor, dy_bp, krdv01, contribution}` 与前端 Task 15 表格列一致。
 4. **已知取舍**:平缓曲线下"远期=平价利率"是近似(单利贴现结构性偏差 ~0.05bp),测试全部改用精确表达式,不引入虚假直觉。
 
+
+---
+
+## 收尾清理清单(各 Task 评审遗留的延后项;全部任务完成后、最终整体评审时统一处理)
+
+> 记录原则:评审发现但裁定不阻塞当前任务的项,按文件归堆。最终评审轮逐项决定"修/不修",修则补测试。
+
+### Task 1(error 路径)
+- error-path 测试缺口
+
+### Task 3(curve)
+- interp-body 与 `_interp_bump` 结构重复,可去重
+- `zero_rate` 插值测试可用 `pytest.approx` 替代手工 τ 推导
+- 点日期断言可用元组比较;`DAY_COUNT` 注释;forward docstring
+
+### Task 4(schedule)
+- freq 守卫(非法 fixed_freq_months)缺失
+- 月末日期(如 01-31 + 1M)排期测试
+- 排期行可改元组断言
+
+### Task 5(pricing 固定腿)
+- `price_fixed_leg` docstring 与测试文件头的 `__import__("datetime")` 写法可读性欠佳
+
+### Task 6(pricing 浮动腿)
+- resolve_sub_rate 与 price_floating_leg 的曲线校验重复
+- SHIBOR3M 远期路径无测试(仅 fixing 路径)
+- 多行浮腿 PV 聚合无专测
+
+### Task 7(value_swap)
+- 返回 dict 可改 TypedDict 增强类型提示
+
+### Task 8(risk)
+- key_tenors 为空的防御(向上取整语义裁决:fold-in,见 Task 10)
+- BUMP 常量反斜杠续行;不变量 docstring;base NPV 与 value_swap 重复计算
+
+### Task 9(loader)
+- 未知 benchmark 用 KeyError→MarketDataError 包装
+- missing-quote 错误信息带 sec_id;重复 sec_id 检测
+- `fixings_for` docstring(空 dict 契约);类型注解 `list[dict[str, str]]`;表头校验
+- 测试只断言状态码,可加错误文案内容断言
+
+### Task 10(attribution,复审 Approved 时遗留)
+- Minor-1:keys 为空的合法窗口(剩余期限早于首档)会把 mechanism/residual 门误判 False 并带误导性告警——应跳过校验或改"无法校验"类告警(方向保守,非阻塞)
+- Minor-2:`test_attribution_rejects_bad_window` 未覆盖 `end <= effective` 分支
+- M2:跨模块导入私有 `_lookup_fixing`(应提为公开或复制)
+- M5:命名 `dv01`/`krdv01` 与 risk 模块不一致
+- M6:static_curve 点集与 curve_t1 点集可能不一致的口径说明
+- SHIBOR3M 归因测试缺口;curve-down 情景;spread≠0 归因
+- 设计候选(二期):尾部敏感度"保留尾桶"而非折入末档(涉及 §4.5 口径与 Task 8 钉测试)
+
+### API 层(Task 11/12 评审时更新)
+- 定盘时效性告警(freshness)是 API 层职责(pricing._lookup_fixing docstring 已记录);Task 12 落地
+- MarketDataError→404 映射已由 loader 全覆盖(品种缺期限/估值日无行情/定盘空/解析错误)
