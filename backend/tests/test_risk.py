@@ -1,3 +1,4 @@
+import datetime
 from datetime import date
 from app.core.calendar import Calendar
 from app.core.conventions import BENCHMARKS
@@ -11,7 +12,7 @@ d = date(2025, 1, 1)
 while d <= date(2026, 12, 31):
     if d.weekday() < 5:
         BD.add(d)
-    d += __import__("datetime").timedelta(days=1)
+    d += datetime.timedelta(days=1)
 CAL = Calendar(BD)
 
 TRADE = dict(

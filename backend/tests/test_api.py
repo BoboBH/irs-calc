@@ -102,7 +102,7 @@ def test_value_missing_fixing_422():
 
 
 def test_value_stale_fixing_warning():
-    """估值日 2026-11-20 晚于定盘序列末尾(真实数据止于 2026-11-06,缺口 14 天 > 7)
+    """估值日 2026-11-20 晚于定盘序列末尾(真实数据止于 2026-11-06,缺口 14 天 > 11)
     → warnings 含定盘陈旧告警(Task 11 移交项 1);且 11-20 < 到期日,ex-coupon 下
     尚有 12-01 支付 → npv≠0(原 12-01 场景等于到期日,现金流全被剔除,npv 恒 0)。"""
     req = {**VALUE_REQ, "valuation_date": "2026-11-20"}

@@ -1,3 +1,4 @@
+import datetime
 from datetime import date
 from app.core.calendar import Calendar
 from app.core.conventions import BENCHMARKS, year_fraction
@@ -11,7 +12,7 @@ d = date(2025, 1, 1)
 while d <= date(2026, 12, 31):
     if d.weekday() < 5:
         BD.add(d)
-    d += __import__("datetime").timedelta(days=1)
+    d += datetime.timedelta(days=1)
 CAL = Calendar(BD)
 
 
@@ -157,6 +158,22 @@ def test_floating_shibor3m_day_count_360():
     assert p1.sub_periods[0].source == "fixing"
     expected_cf = 100_000_000 * 0.014 * 92 / 360
     assert abs(p1.amount - expected_cf) < 1e-6
+
+
+def test_floating_shibor3m_forward_when_reset_in_future():
+    """SHIBOR3M 远期路径:起息日在估值日之后 → reset > 估值日,fixings 为空也定价,
+    子期利率 = 曲线隐含远期(平缓曲线闭式,混合基数:DF 按 ACT/365、远期 τ 按
+    ACT/360:F = y·360/365 / (1 + y·τ_d1/365),τ_d1 = 锚定日到子期起点 9 天)。"""
+    spec = BENCHMARKS["SHIBOR3M"]
+    sk = build_floating_skeleton(date(2026, 6, 10), date(2026, 12, 10), CAL, spec)
+    leg = price_floating_leg(sk, 100_000_000, VAL, flat_curve(), spec,
+                             fixings={}, spread=0.0)
+    sp = leg.rows[0].sub_periods[0]
+    assert sp.source == "forward"
+    expected_rate = 0.014 * 360 / 365 / (1 + 0.014 * 9 / 365)
+    assert abs(sp.rate - expected_rate) < 1e-12
+    expected_cf = 100_000_000 * expected_rate * 92 / 360  # 06-10 → 09-10 共 92 天
+    assert abs(leg.rows[0].amount - expected_cf) < 1e-6
 
 
 def test_fixed_leg_pay_on_valuation_excluded():

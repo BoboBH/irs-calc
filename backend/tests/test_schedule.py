@@ -1,7 +1,7 @@
 from datetime import date
 from app.core.calendar import Calendar
 from app.core.conventions import BENCHMARKS
-from app.core.schedule import build_fixed_skeleton, build_floating_skeleton
+from app.core.schedule import add_months, build_fixed_skeleton, build_floating_skeleton
 
 # 2026-05-25 ~ 2026-12-31 中所有工作日视为交易日(测试用简化日历)
 BD = set()
@@ -72,3 +72,23 @@ def test_period_dates_adjusted():
     assert p1.pay_date == date(2026, 9, 7)
     assert p1.sub_periods[0].reset_date == date(2026, 6, 5)
     assert p1.sub_periods[-1].accrual_end == date(2026, 9, 7)
+
+
+def test_add_months_clamps_month_end():
+    assert add_months(date(2026, 1, 31), 1) == date(2026, 2, 28)
+
+
+def test_schedule_skips_zero_length_period_after_adjustment():
+    """月末钳制把中间期压到与到期重合时,跳过 0 天期。
+
+    effective=2026-05-30(周六,修正顺延回 05-29)、maturity=2026-08-31、月频:
+    网格 05-30/06-30/07-30/08-30,而 08-30 调整后 = 08-31 与到期重合,原实现会
+    再补一行 (08-31, 08-31) 0 天期;修后跳过该期,到期期 (07-30, 08-31) 完整。
+    两腿共用的 _build_periods 同修:浮动腿季付同样不再出现 0 天尾期。"""
+    sk = build_fixed_skeleton(date(2026, 5, 30), date(2026, 8, 31), 1, CAL)
+    assert all(p.accrual_start < p.accrual_end for p in sk.periods)
+    assert sk.periods[-1].accrual_end == date(2026, 8, 31)
+    assert len(sk.periods) == 3
+    skf = build_floating_skeleton(date(2026, 5, 30), date(2026, 8, 31), CAL, BENCHMARKS["FR007"])
+    assert all(p.accrual_start < p.accrual_end for p in skf.periods)
+    assert skf.periods[-1].accrual_end == date(2026, 8, 31)

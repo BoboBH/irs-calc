@@ -27,7 +27,7 @@ def get_market(benchmark: str = Query(...), date: date = Query(...)):
     eligible = [d for d in fx if d <= date]
     if eligible:
         latest = max(eligible)
-        fixing = {"date": latest.isoformat(), "rate": fx[latest] * 100.0}
+        fixing = {"date": latest.isoformat(), "rate": round(fx[latest] * 100.0, 6)}
     return MarketOut(
         benchmark=benchmark, valuation_date=date,
         curve=[{"tenor": p.label, "rate": p.rate * 100.0} for p in pts],

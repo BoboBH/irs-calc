@@ -54,7 +54,10 @@ def _build_periods(effective: date, maturity: date, freq_months: int,
     while True:
         raw_end = maturity if add_months(effective, k) >= maturity else add_months(effective, k)
         end_adj = calendar.adjust_modified_following(raw_end)
-        periods.append((start_adj, end_adj, end_adj))
+        # 月末钳制可能把中间期(或到期网格日)调整后压到与上一期止点重合:
+        # 跳过该零长期(不能 break——到期的完整期次仍要保留),其他期次不变
+        if end_adj > start_adj:
+            periods.append((start_adj, end_adj, end_adj))
         if raw_end == maturity:
             break
         start_adj = end_adj
