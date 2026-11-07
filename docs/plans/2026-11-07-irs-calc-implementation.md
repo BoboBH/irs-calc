@@ -3318,13 +3318,14 @@ export const postAttribution = (payload) =>
 
 <script setup>
 import { computed, defineComponent, h, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElCard, ElMessage } from 'element-plus'
 import { loadMarket, postAttribution, postValue } from '../api/client'
 
 const StatCard = defineComponent({
   props: { title: String, v: Number },
   setup(props) {
-    return () => h('el-card', { shadow: 'never' }, () => [
+    // h() 的字符串标签不会解析全局注册组件(只走原生 createElement),必须传组件对象
+    return () => h(ElCard, { shadow: 'never' }, () => [
       h('div', { style: 'color:#909399;font-size:13px' }, props.title),
       h('div', {
         style: `font-size:20px;font-weight:600;color:${props.v < 0 ? '#f56c6c' : '#303133'}`,
@@ -3391,7 +3392,9 @@ function payload() {
 
 function errText(e) {
   const d = e?.response?.data?.detail
-  return typeof d === 'string' ? d : '请求失败'
+  if (typeof d === 'string') return d
+  if (Array.isArray(d)) return d.map(x => `${x.msg}(${(x.loc || []).slice(1).join('.')})`).join('; ')
+  return `请求失败(${e?.response?.status ?? e?.message ?? '未知错误'})`
 }
 
 async function onLoadMarket() {
@@ -3403,6 +3406,7 @@ async function onLoadMarket() {
     marketApprox.value = m.calendar_approximate
     valueResult.value = null
     attributionResult.value = null
+    warnings.value = []  // 新行情下旧告警必失效,随结果一并清空
   } catch (e) {
     ElMessage.error(errText(e))
   } finally {
@@ -3575,3 +3579,15 @@ cd /d/git/irs-calc && git add -A && git commit -m "chore: 端到端验收通过"
 ### Task 15(估值页,实现轮 NEEDS_CONTEXT 裁定记录)
 - 默认合约(到期 2026-12-01、估值 2026-11-06,剩余 ~25 天<1M)首屏 DV01 页签空、归因勾稽"失败"diff=0——均为后端防御/Task 10 Minor-1 的预期行为,核对预期已在 Task 15 Step 3 修正;前端代码本身正确(commit ab7c774)
 - UX 二期考量:若嫌默认首屏空洞,可把默认到期日改为剩余期限覆盖曲线首档的日期(裁定:一期不改,保持计划默认值)
+
+### Task 15(质量复审 ❌→修复,2026-11-07)
+- C1(已修):h('el-card') 字符串标签不解析全局注册组件(原生 createElement,SSR 实证)→ h(ElCard);I1(已修):errText 补 pydantic 422 数组 detail 映射与状态码回退;I2(已修):onLoadMarket 清 warnings。三处均为计划自带缺陷,计划代码块已同步
+- M1:fixingInfo 浮点垃圾显示(1.57 → 1.5700000000000003)——与 API 层 M3 同源,合并处理
+- M2:krdvSum 原始浮点累加与 2 位格式化在边界偶发矛盾(提示语可改"≈"或先格式化再求和)
+- M3:identity.diff=0 时 toExponential(2) 显示 "0.00e+0"(可改三元输出 '0')
+- M4:warnings 互相覆盖:归因告警替换估值告警但估值卡仍在展示(可按结果分别挂告警)
+- M5:两个按钮可并发、归因响应自带 valuation_t1 未用(单人计算器可接受;可选任一 loading 时禁其余按钮)
+- M6:onValue 强制跳回 krdv 页签(UX 取舍)
+- M7:曲线为空直接算估值走后端自动加载,表里不一(可加提示"曲线为空,已按估值日自动加载")
+- M8:构建产物 1.06MB 单 chunk(全量 Element Plus;可二期 unplugin-vue-components 按需引入/manualChunks)
+- M9:App.vue 直 import 单视图合理;二期多视图再引入 vue-router
