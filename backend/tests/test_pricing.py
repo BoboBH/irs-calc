@@ -2,7 +2,7 @@ from datetime import date
 from app.core.calendar import Calendar
 from app.core.conventions import BENCHMARKS, year_fraction
 from app.core.curve import CurvePoint, ZeroCurve
-from app.core.pricing import MissingFixingError, price_fixed_leg, price_floating_leg
+from app.core.pricing import MissingFixingError, price_fixed_leg, price_floating_leg, value_swap
 from app.core.schedule import build_fixed_skeleton, build_floating_skeleton
 
 VAL = date(2026, 6, 1)
@@ -168,3 +168,40 @@ def test_fixed_leg_pay_on_valuation_excluded():
                             CurvePoint("2Y", date(2028, 9, 1), 0.014)])
     leg = price_fixed_leg(sk, 100_000_000, 0.0165, v, curve_v, CAL, 365)
     assert [r.pay_date for r in leg.rows] == [date(2026, 12, 1)]
+
+
+TRADE = dict(
+    benchmark="FR007", direction="receiver", notional=100_000_000,
+    fixed_rate=0.0165, spread=0.0,
+    effective_date=date(2026, 6, 1), maturity_date=date(2026, 12, 1),
+    fixed_freq_months=3,
+)
+
+
+def test_value_swap_receiver_positive_when_k_above_curve():
+    res = value_swap(TRADE, VAL, flat_curve(), CAL, BENCHMARKS["FR007"], fixings={date(2026, 6, 1): 0.014})
+    assert res["pv_fixed"] > res["pv_floating"]
+    assert res["npv"] == res["pv_fixed"] - res["pv_floating"]  # receiver ω=+1
+
+
+def test_value_swap_payer_flips_sign():
+    payer = dict(TRADE, direction="payer")
+    res = value_swap(payer, VAL, flat_curve(), CAL, BENCHMARKS["FR007"], fixings={date(2026, 6, 1): 0.014})
+    assert res["npv"] == -(res["pv_fixed"] - res["pv_floating"])
+
+
+def test_par_swap_npv_near_zero():
+    """按曲线构造的平价互换 NPV ≈ 0。"""
+    spec = BENCHMARKS["FR007"]
+    fixings = {date(2026, 6, 1): 0.014}
+    curve = flat_curve()
+    probe = dict(TRADE, fixed_rate=0.0)
+    res0 = value_swap(probe, VAL, curve, CAL, spec, fixings=fixings)
+    # 平价率 K* = PV浮动 / (N·Στᵢ·DFᵢ)
+    tau_df = 0.0
+    for r in res0["fixed_rows"]:
+        tau_df += r.tau * r.df
+    k_star = res0["pv_floating"] / (100_000_000 * tau_df)
+    par = dict(TRADE, fixed_rate=k_star)
+    res = value_swap(par, VAL, curve, CAL, spec, fixings=fixings)
+    assert abs(res["npv"]) < 1e-4

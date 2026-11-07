@@ -7,7 +7,13 @@ from datetime import date
 from app.core.calendar import Calendar
 from app.core.conventions import BenchmarkSpec, year_fraction
 from app.core.curve import ZeroCurve
-from app.core.schedule import PeriodSkeleton, ScheduleSkeleton, SubPeriodSkeleton
+from app.core.schedule import (
+    PeriodSkeleton,
+    ScheduleSkeleton,
+    SubPeriodSkeleton,
+    build_fixed_skeleton,
+    build_floating_skeleton,
+)
 
 
 class MissingFixingError(ValueError):
@@ -120,3 +126,31 @@ def price_floating_leg(sk: ScheduleSkeleton, notional: float, valuation: date,
             rate=acc / total_tau if total_tau else 0.0,
             amount=amount, df=df, pv=amount * df, sub_periods=sub_rows))
     return LegResult(rows=rows, pv=sum((r.pv for r in rows), 0.0))
+
+
+def value_swap(trade: dict, valuation: date, curve: ZeroCurve, calendar: Calendar,
+               spec: BenchmarkSpec, *, fixings: dict[date, float]) -> dict:
+    """整笔互换估值。
+
+    trade 键:benchmark/direction/notional/fixed_rate/spread/effective_date/
+    maturity_date/fixed_freq_months(direction: receiver|payer,receiver=收固定 ω=+1)。
+    返回 dict:npv/pv_fixed/pv_floating/fixed_rows/floating_rows。
+    """
+    fixed_freq = trade.get("fixed_freq_months", spec.fixed_freq_months)
+    sk_fix = build_fixed_skeleton(trade["effective_date"], trade["maturity_date"],
+                                  fixed_freq, calendar)
+    sk_flt = build_floating_skeleton(trade["effective_date"], trade["maturity_date"],
+                                     calendar, spec)
+    leg_fix = price_fixed_leg(sk_fix, trade["notional"], trade["fixed_rate"],
+                              valuation, curve, calendar, spec.fixed_day_count)
+    leg_flt = price_floating_leg(sk_flt, trade["notional"], valuation, curve, spec,
+                                 fixings=fixings, spread=trade.get("spread", 0.0))
+    omega = 1.0 if trade["direction"] == "receiver" else -1.0
+    return {
+        "npv": omega * (leg_fix.pv - leg_flt.pv),
+        "pv_fixed": leg_fix.pv,
+        "pv_floating": leg_flt.pv,
+        "omega": omega,
+        "fixed_rows": leg_fix.rows,
+        "floating_rows": leg_flt.rows,
+    }
