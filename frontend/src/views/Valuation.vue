@@ -213,13 +213,14 @@
 
 <script setup>
 import { computed, defineComponent, h, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElCard, ElMessage } from 'element-plus'
 import { loadMarket, postAttribution, postValue } from '../api/client'
 
 const StatCard = defineComponent({
   props: { title: String, v: Number },
   setup(props) {
-    return () => h('el-card', { shadow: 'never' }, () => [
+    // h() 的字符串标签不会解析全局注册组件(只走原生 createElement),必须传组件对象
+    return () => h(ElCard, { shadow: 'never' }, () => [
       h('div', { style: 'color:#909399;font-size:13px' }, props.title),
       h('div', {
         style: `font-size:20px;font-weight:600;color:${props.v < 0 ? '#f56c6c' : '#303133'}`,
@@ -286,7 +287,9 @@ function payload() {
 
 function errText(e) {
   const d = e?.response?.data?.detail
-  return typeof d === 'string' ? d : '请求失败'
+  if (typeof d === 'string') return d
+  if (Array.isArray(d)) return d.map(x => `${x.msg}(${(x.loc || []).slice(1).join('.')})`).join('; ')
+  return `请求失败(${e?.response?.status ?? e?.message ?? '未知错误'})`
 }
 
 async function onLoadMarket() {
@@ -298,6 +301,7 @@ async function onLoadMarket() {
     marketApprox.value = m.calendar_approximate
     valueResult.value = null
     attributionResult.value = null
+    warnings.value = []  // 新行情下旧告警必失效,随结果一并清空
   } catch (e) {
     ElMessage.error(errText(e))
   } finally {
