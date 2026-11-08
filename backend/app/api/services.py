@@ -11,6 +11,7 @@ from app.core.curve import CurvePoint, ZeroCurve
 from app.core.pricing import value_swap
 from app.core.schedule import add_months
 from app.dataio import loader
+from app.dataio.loader import MarketDataError
 from app.api.schemas import AttributionRequest, TradeRequest
 
 
@@ -110,13 +111,43 @@ def _rows(rows):
     } for r in rows]
 
 
+def _zero_attribution(valuation_date: date) -> dict:
+    """估值日非交易日(无行情)的全零归因:结构与 AttributionResponse 逐字段一致,
+    不进内核;金额/效应分量置 0、曲线效应明细空表、勾稽门放行。"""
+    return {
+        "delta_npv": 0.0,
+        "cf": 0.0,
+        "components": {"theta": 0.0, "carry": 0.0, "roll": 0.0,
+                       "curve": 0.0, "spread": 0.0, "residual": 0.0},
+        "identity": {"ok": True, "diff": 0.0},
+        "detail": [],
+        "valuation_t1": {
+            "npv": 0.0, "pv_fixed": 0.0, "pv_floating": 0.0,
+            "dv01_parallel": 0.0, "krdv01": [],
+            "cashflows": {"fixed": [], "floating": []},
+            "warnings": [],
+        },
+        "warnings": [f"估值日 {valuation_date.isoformat()} 非交易日(无行情),归因各分项为 0"],
+    }
+
+
 def do_attribution(req: AttributionRequest, calendar: Calendar) -> dict:
     spec = BENCHMARKS[req.benchmark]
     trade = request_to_trade(req)
-    curve_t0 = build_curve(req.benchmark, req.start_date, req.curve)
+    start = req.start_date
+    if start is None:
+        # 默认窗口 [T-1, T]:t1 无行情 → 全零归因(200 + 告警);有 T 无更早行情 → 404
+        dates = loader.available_curve_dates(req.benchmark)
+        if req.valuation_date not in dates:
+            return _zero_attribution(req.valuation_date)
+        prior = [d for d in dates if d < req.valuation_date]
+        if not prior:
+            raise MarketDataError(f"估值日 {req.valuation_date} 无更早行情,无法构造 T-1")
+        start = prior[-1]
+    curve_t0 = build_curve(req.benchmark, start, req.curve)
     curve_t1 = build_curve(req.benchmark, req.valuation_date, req.curve)
     fixings = load_fixings(req.benchmark, req.fixing_overrides)
-    res = run_attribution(trade=trade, start_date=req.start_date, end_date=req.valuation_date,
+    res = run_attribution(trade=trade, start_date=start, end_date=req.valuation_date,
                           curve_t0=curve_t0, curve_t1=curve_t1, fixings=fixings,
                           calendar=calendar, spec=spec)
     value_part = do_value(req, calendar)

@@ -35,7 +35,7 @@ class TradeRequest(BaseModel):
 
 
 class AttributionRequest(TradeRequest):
-    start_date: date                   # t0
+    start_date: date | None = None     # t0;缺省 = 默认窗口,自动取行情中 T-1 = max(d < T)
 
 
 class Krdv01Out(BaseModel):

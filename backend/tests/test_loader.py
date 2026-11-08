@@ -1,8 +1,9 @@
 from datetime import date
 import pytest
 from app.core.conventions import BENCHMARKS
-from app.dataio.loader import (MarketDataError, build_calendar, curve_for,
-                               fixings_for, load_instruments, load_value_rows)
+from app.dataio.loader import (MarketDataError, available_curve_dates,
+                               build_calendar, curve_for, fixings_for,
+                               load_instruments, load_value_rows)
 
 
 def test_load_value_rows_parses_comma_secid_and_percent():
@@ -41,6 +42,19 @@ def test_curve_for_shibor3m():
 def test_curve_for_missing_date_raises():
     with pytest.raises(MarketDataError):
         curve_for("FR007", date(2024, 1, 1))
+
+
+def test_available_curve_dates_full_coverage_only():
+    """默认窗口 T-1 取法的数据基础:仅统计全部互换期限都有行情的日期。
+    2024-11-07 仅 6/11 个 FR007 期限有值,不在列;首个全期限日为 2024-11-08。"""
+    dates = available_curve_dates("FR007")
+    assert dates == sorted(dates)
+    assert dates[0] == date(2024, 11, 8)
+    assert dates[-1] == date(2026, 11, 6)
+    assert date(2026, 11, 7) not in dates          # 周六,无行情
+    assert date(2024, 11, 7) not in dates          # 部分期限缺行情
+    s = available_curve_dates("SHIBOR3M")
+    assert s[-1] == date(2026, 11, 6)
 
 
 def test_fixings_for_fr007_and_shibor3m():

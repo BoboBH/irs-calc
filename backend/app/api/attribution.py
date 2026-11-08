@@ -13,7 +13,7 @@ router = APIRouter(prefix="/api")
 
 @router.post("/attribution", response_model=AttributionResponse)
 def post_attribution(req: AttributionRequest):
-    if req.start_date >= req.valuation_date:
+    if req.start_date is not None and req.start_date >= req.valuation_date:
         raise HTTPException(422, "归因起始日 t0 必须早于估值日 t1")
     if req.effective_date >= req.maturity_date:
         raise HTTPException(400, "起息日必须早于到期日")

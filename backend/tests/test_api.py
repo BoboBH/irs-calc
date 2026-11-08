@@ -177,3 +177,56 @@ def test_attribution_valuation_beyond_maturity_400():
     req = {**VALUE_REQ, "start_date": "2026-06-01", "valuation_date": "2027-01-10"}
     r = client.post("/api/attribution", json=req)
     assert r.status_code == 400
+
+
+ATTR_AUTO_REQ = {**VALUE_REQ, "curve": [], "valuation_date": "2026-11-06",
+                 "effective_date": "2026-06-01", "maturity_date": "2028-06-01",
+                 "fixing_overrides": {}}
+
+
+def test_attribution_default_window_prev_trading_day():
+    """无 start_date、T=2026-11-06(数据末个交易日)→ 默认 t0=2026-11-05(行情中 max(d<T)),
+    结果与显式传同一 t0 完全一致,且各分量非全零。"""
+    r_def = client.post("/api/attribution", json=ATTR_AUTO_REQ)
+    assert r_def.status_code == 200
+    b_def = r_def.json()
+    r_exp = client.post("/api/attribution", json={**ATTR_AUTO_REQ, "start_date": "2026-11-05"})
+    assert r_exp.status_code == 200
+    b_exp = r_exp.json()
+    assert b_def["cf"] == pytest.approx(b_exp["cf"])
+    assert b_def["delta_npv"] == pytest.approx(b_exp["delta_npv"])
+    for k in b_def["components"]:
+        assert b_def["components"][k] == pytest.approx(b_exp["components"][k]), k
+    assert b_def["detail"] == b_exp["detail"]
+    assert b_def["identity"] == b_exp["identity"]
+    assert b_def["delta_npv"] != 0
+    assert any(v != 0 for v in b_def["components"].values())
+
+
+def test_attribution_default_window_non_trading_t_zero_response():
+    """无 start_date、T=2026-11-07(周六,行情无此日)→ 200 全零归因(结构逐字段与正常
+    一致:金额/效应 0、明细空表、identity ok/diff=0),warnings 含非交易日说明。"""
+    req = {**VALUE_REQ, "valuation_date": "2026-11-07"}
+    r = client.post("/api/attribution", json=req)
+    assert r.status_code == 200
+    b = r.json()
+    assert b["delta_npv"] == 0.0
+    assert b["cf"] == 0.0
+    assert b["components"] == {"theta": 0.0, "carry": 0.0, "roll": 0.0,
+                               "curve": 0.0, "spread": 0.0, "residual": 0.0}
+    assert b["identity"] == {"ok": True, "diff": 0.0}
+    assert b["detail"] == []
+    vt = b["valuation_t1"]
+    assert vt["npv"] == 0.0 and vt["pv_fixed"] == 0.0 and vt["pv_floating"] == 0.0
+    assert vt["dv01_parallel"] == 0.0
+    assert vt["krdv01"] == [] and vt["cashflows"] == {"fixed": [], "floating": []}
+    assert any("非交易日" in w and "2026-11-07" in w for w in b["warnings"])
+
+
+def test_attribution_default_window_earliest_trading_day_404():
+    """无 start_date、T=数据最早可得交易日 2024-11-08(更早无任何全期限行情日)
+    → 404,detail 含"无更早行情"。"""
+    req = {**ATTR_AUTO_REQ, "valuation_date": "2024-11-08"}
+    r = client.post("/api/attribution", json=req)
+    assert r.status_code == 404
+    assert "无更早行情" in r.json()["detail"]

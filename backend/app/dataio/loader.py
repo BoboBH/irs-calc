@@ -83,6 +83,18 @@ def curve_for(benchmark: str, valuation_date: date) -> list[CurvePoint]:
     return points
 
 
+def available_curve_dates(benchmark: str) -> list[date]:
+    """该基准全部互换期限都有行情的日期集(升序)。
+
+    与 curve_for 的可用性口径一致(任一期限缺值的日子不算,如数据初期的
+    部分覆盖日);供归因默认窗口 T-1 = max(d < T) 查询,单次读盘。"""
+    spec = BENCHMARKS[benchmark]
+    rows = load_value_rows()
+    sec_map = _tenor_sec_ids(load_instruments(), spec)
+    common = set.intersection(*(set(rows.get(sec_map[t], {})) for t in spec.swap_tenors))
+    return sorted(common)
+
+
 def fixings_for(benchmark: str) -> dict[date, float]:
     spec = BENCHMARKS[benchmark]
     return load_value_rows().get(spec.fixing_sec_id, {})
