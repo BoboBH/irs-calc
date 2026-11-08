@@ -43,7 +43,7 @@ def request_to_trade(req: TradeRequest) -> dict:
         "direction": req.direction,
         "notional": req.notional,
         "fixed_rate": req.fixed_rate / 100.0,
-        "spread": req.spread / 100.0,
+        "spread": req.spread_bp / 10000.0,
         "effective_date": req.effective_date,
         "maturity_date": req.maturity_date,
         "fixed_freq_months": req.fixed_freq_months,

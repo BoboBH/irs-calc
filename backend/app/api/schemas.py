@@ -1,4 +1,5 @@
-"""API 请求/响应模型。接口层利率一律用百分数(1.65 = 1.65%),内核层用小数。"""
+"""API 请求/响应模型。接口层利率一律用百分数(1.65 = 1.65%)、浮动端利差一律用基点
+(spread_bp,25 = 25bp),内核层用小数;换算在装配层完成(/100、/10000)。"""
 from __future__ import annotations
 
 from datetime import date
@@ -25,7 +26,7 @@ class TradeRequest(BaseModel):
     direction: Literal["receiver", "payer"]
     notional: float = Field(gt=0)
     fixed_rate: float                  # %
-    spread: float = 0.0                # %
+    spread_bp: float = 0.0             # bp(基点),叠加在基准指标之上;内核 = spread_bp/10000
     effective_date: date
     maturity_date: date
     fixed_freq_months: int = Field(default=3, ge=1, le=12)

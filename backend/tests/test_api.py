@@ -48,7 +48,7 @@ def test_market_transition_period_fixing_none_and_calendar_approximate():
 
 VALUE_REQ = {
     "benchmark": "FR007", "direction": "receiver",
-    "notional": 100_000_000, "fixed_rate": 1.65, "spread": 0.0,
+    "notional": 100_000_000, "fixed_rate": 1.65, "spread_bp": 0.0,
     "effective_date": "2026-06-01", "maturity_date": "2026-12-01",
     "fixed_freq_months": 3, "valuation_date": "2026-06-01",
     "curve": [
@@ -310,3 +310,21 @@ def test_value_curve_interp_hermite_changes_npv():
 def test_value_curve_interp_bad_value_422():
     r = client.post("/api/value", json={**VALUE_REQ, "curve_interp": "cubic"})
     assert r.status_code == 422
+
+
+def test_value_spread_bp_unit_wiring():
+    """spread_bp 单位为基点(25bp = 0.0025):浮动腿每期金额精确增加
+    N·s·Στ(sub_periods 的 τ 之和),固定腿与指标利率不受影响;
+    钉住装配层 /10000 换算与内核 spread(小数)的接线。"""
+    r0 = client.post("/api/value", json=VALUE_REQ)
+    r25 = client.post("/api/value", json={**VALUE_REQ, "spread_bp": 25})
+    assert r0.status_code == r25.status_code == 200
+    b0, b25 = r0.json(), r25.json()
+    f0 = b0["cashflows"]["floating"][0]
+    f25 = b25["cashflows"]["floating"][0]
+    s = 25 / 10000.0
+    tau = sum(sp["tau"] for sp in f25["sub_periods"])
+    assert f25["amount"] - f0["amount"] == pytest.approx(100_000_000 * s * tau)
+    assert f25["rate"] == pytest.approx(f0["rate"])          # 指标利率不含 spread
+    assert b25["pv_fixed"] == pytest.approx(b0["pv_fixed"])  # 固定腿不受利差影响
+    assert b25["npv"] - b0["npv"] == pytest.approx(-(b25["pv_floating"] - b0["pv_floating"]))

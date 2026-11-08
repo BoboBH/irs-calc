@@ -65,8 +65,8 @@
         <section class="group">
           <div class="group-title">浮动端</div>
           <div class="field">
-            <label>利差 %(叠加在基准之上)</label>
-            <el-input-number v-model="form.spread" :step="0.0001" :precision="4" :controls="false" />
+            <label>利差 bp(叠加在基准之上)</label>
+            <el-input-number v-model="form.spread" :step="1" :precision="2" :controls="false" />
           </div>
         </section>
 
@@ -369,7 +369,7 @@ function formatNumber(v) {
 
 const form = ref({
   benchmark: 'FR007', direction: 'receiver', notional: 100000000,
-  fixedRate: 1.65, spread: 0.0,
+  fixedRate: 1.65, spread: 0.0,  // 浮动端利差,单位 bp(与 API spread_bp 同口径)
   effectiveDate: '2026-06-01', maturityDate: '2029-06-01',
   fixedFreqMonths: 3, valuationDate: '2026-11-06', startDate: '',
   discountBasis: 'cont', principalExchange: true,  // 定盘取值固定当日,见 payload 里 fixing_lag_bd
@@ -576,7 +576,7 @@ function payload() {
     direction: form.value.direction,
     notional: form.value.notional,
     fixed_rate: form.value.fixedRate,
-    spread: form.value.spread,
+    spread_bp: form.value.spread,  // bp,与输入框同单位,不做换算
     effective_date: form.value.effectiveDate,
     maturity_date: form.value.maturityDate,
     fixed_freq_months: form.value.fixedFreqMonths,
