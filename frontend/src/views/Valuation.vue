@@ -429,24 +429,37 @@ const curveChart = computed(() => {
   const xOf = (d) => PAD.l + (d - d0) / (d1 - d0) * W
   const yOf = (r) => PAD.t + (hi - r) / (hi - lo) * H
 
-  // 与后端 ZeroCurve.zero_rate 同法:零利率线性插值、两端平推 —— 图上呈现的即定价所用曲线
+  // 显示层平滑:单调三次 Hermite(Fritsch–Carlson)过全部报价点,节点处切线连续、无过冲,
+  // 与中债/厂商曲线同族;端部切线取 0 与定价曲线两端平推衔接。
+  // 定价内核仍为零利率线性插值,NPV/DV01 不受影响(节点值与端部区间与定价一致,节点间为视觉平滑)。
+  const nQ = raw.length
+  const del = []
+  for (let i = 0; i < nQ - 1; i++)
+    del.push((raw[i + 1].rate - raw[i].rate) / (raw[i + 1].days - raw[i].days))
+  const tan = raw.map(() => 0)
+  for (let i = 1; i < nQ - 1; i++) {
+    if (del[i - 1] * del[i] <= 0) continue // 局部极值点切线取 0,防止过冲
+    const h0 = raw[i].days - raw[i - 1].days
+    const h1 = raw[i + 1].days - raw[i].days
+    const w1 = 2 * h1 + h0, w2 = h1 + 2 * h0
+    tan[i] = (w1 + w2) / (w1 / del[i - 1] + w2 / del[i])
+  }
   const zeroAt = (d) => {
     if (d <= raw[0].days) return raw[0].rate
-    if (d >= raw[raw.length - 1].days) return raw[raw.length - 1].rate
-    for (let i = 0; i < raw.length - 1; i++) {
-      if (d <= raw[i + 1].days) {
-        const w = (d - raw[i].days) / (raw[i + 1].days - raw[i].days)
-        return raw[i].rate + (raw[i + 1].rate - raw[i].rate) * w
-      }
-    }
-    return raw[raw.length - 1].rate
+    if (d >= raw[nQ - 1].days) return raw[nQ - 1].rate
+    let i = 0
+    while (i < nQ - 2 && d > raw[i + 1].days) i++
+    const a = raw[i], b = raw[i + 1], h = b.days - a.days
+    const t = (d - a.days) / h, t2 = t * t, t3 = t2 * t
+    return (2 * t3 - 3 * t2 + 1) * a.rate + (t3 - 2 * t2 + t) * h * tan[i]
+         + (-2 * t3 + 3 * t2) * b.rate + (t3 - t2) * h * tan[i + 1]
   }
   const lblOf = (d) => {
     const a = raw.find(p => Math.abs(p.days - d) < 0.01)
     return a ? a.tenor : daysLabel(d)
   }
 
-  // 按基准的重置周期细采样(FR007 每周 / Shibor 3M 每季)替代报价点直连,折线视觉平滑
+  // 按基准的重置周期细采样(FR007 每周 / Shibor 3M 每季)替代报价点直连,配合 Hermite 视觉平滑
   const stepDays = form.value.benchmark === 'FR007' ? 7 : 3 * 30.4375
   const sampled = [{ d: d0, rate: zeroAt(d0) }]
   if (d1 > d0 + 1e-9) {
