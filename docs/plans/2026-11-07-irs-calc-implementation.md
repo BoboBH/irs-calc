@@ -3618,3 +3618,14 @@ puppeteer-core + 系统 Chrome 无头驱动真实页面(静态托管 http://127.
 - schedule 零长期:跳过(非 break)零长期、保到期完整期,effective=2026-05-30/mat=2026-08-31 复现例钉回归;月末钳制 01-31+1M→02-28 补测
 - 定盘出参 round(×100, 6);SHIBOR3M forward 内核测试(闭式 y·360/365/(1+y·τ/365),混合基数链路);负零归一化、diff=0 显示 '0'、KRDV "≈ 平行 DV01"、空表文案"剩余期限不足最小期限点,DV01 不适用";vite host 127.0.0.1;index.html zh-CN+产品名;死文件 6 个删除;根 README(先构建后启动/数据依赖声明);.gitignore 补锁文件
 - 不修裁定(终审):清理清单中其余项全部留档(多数一期足够/已闭环/二期候选);F1 提交说明"break 丢到期期"理由表述过头——月度网格中间期不可能调整后重合,skip 为更稳健一般形式,行为正确不返工
+
+### 归因默认窗口与无行情归零(2026-11-08,用户追加需求,分支 feature/attribution-default-t0)
+
+用户确认两点:① 估值页须展示曲线/现金流(fixed+floating)/DV01——已有能力,视觉验收 2~5 号截图即证,无需改动;② Campisi 归因默认展示 T 与 T-1 两日归因,T 无完整行情(非交易日或超覆盖)时全部返回 0。实现(提交 711eac2/1176c0e/638d5ee,规格评审 ✅、质量复审 Approved):
+
+- 语义:`start_date` 缺省时取 `available_curve_dates` 中严格小于 T 的最大日(全体 swap tenors 均有报价的日期交集,与 curve_for 逐期限检查严格等价;部分覆盖日视为"无完整行情"落归零,避免默认 t0 踩 404);显式 t0 行为不变(含 t0>=T 的 422)
+- T 不在可得日期集 → HTTP 200 全零归因(components 全 0、detail 空、identity ok=True diff=0、valuation_t1 置零、warnings 恰一条"估值日 {d} 无完整行情(非交易日或超出行情数据覆盖),归因各分项为 0");内核 core/attribution.py 未动,置零在 services 层构造(AttributionResponse 字段增删须同步置零)
+- 无更早行情日(数据集首日)→ MarketDataError 404"无更早行情,无法构造 T-1"
+- 前端:t0 改选填(placeholder"选填 默认上一交易日"),按钮去 t0 禁用,提示文案两行同步;warning 措辞复审修正为不预设事实版本
+- 测试 84 passed:默认窗口 == 显式 t0=2026-11-05 逐字段断言、周六 2026-11-07 全零逐字段+告警文案、首日 2024-11-08 404;零响应测试刻意带显式 3 点曲线,钉住"默认 t0+显式曲线+T 无完整行情仍全零"
+- 浏览器实测(driver2.cjs,console/pageerror 0):场景 A t0 留空 → API 对照证明响应与显式 t0=11-05 逐字节一致(identical: True;默认合约剩余 <1M 故 Curve=0 系关键期限为空的既裁定行为,非缺陷);场景 B T=2026-11-07 周六 → 八卡片全 0.00、明细空表、勾稽绿"通过 (差 0)"、黄色告警文案精确匹配
