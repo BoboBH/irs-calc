@@ -309,9 +309,9 @@ function formatNumber(v) {
 const form = ref({
   benchmark: 'FR007', direction: 'receiver', notional: 100000000,
   fixedRate: 1.65, spread: 0.0,
-  effectiveDate: '2026-06-01', maturityDate: '2026-12-01',
+  effectiveDate: '2026-06-01', maturityDate: '2029-06-01',
   fixedFreqMonths: 3, valuationDate: '2026-11-06', startDate: '',
-  discountBasis: 'simple', fixingLagBd: 0, principalExchange: false,
+  discountBasis: 'simple', fixingLagBd: 0, principalExchange: true,
 })
 const curveRows = ref([])
 let marketCurveSnapshot = null  // 最近一次加载行情的曲线快照(深拷贝,刻意不用响应式)
@@ -376,7 +376,7 @@ function applyVendorPreset() {
 function applyDefaultConvention() {
   form.value.discountBasis = 'simple'
   form.value.fixingLagBd = 0
-  form.value.principalExchange = false
+  form.value.principalExchange = true
 }
 
 // 归因曲线模式:表内曲线与加载行情时的快照逐行一致(或表内为空)→ 发空曲线,
