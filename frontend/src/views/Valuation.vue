@@ -91,13 +91,6 @@
                 <el-radio-button value="cont">连续复利</el-radio-button>
               </el-radio-group>
             </div>
-            <div class="field">
-              <label>定盘取值</label>
-              <el-radio-group v-model="form.fixingLagBd" class="seg">
-                <el-radio-button :value="0">当日</el-radio-button>
-                <el-radio-button :value="1">T-1 营业日</el-radio-button>
-              </el-radio-group>
-            </div>
           </div>
           <div class="grid2" style="margin-top: 12px">
             <div class="field">
@@ -109,7 +102,7 @@
             </div>
           </div>
           <div class="hint" style="margin-top: 4px">
-            插值作用于整条定价曲线:贴现与浮动端未来重置利率预测均随之变化(NPV/DV01 受影响);线性 = 厂商对齐口径,切换后需重新「计算估值」
+            插值作用于整条定价曲线:贴现与浮动端未来重置利率预测均随之变化(NPV/DV01 受影响);线性 = 零利率线性(默认口径),切换后需重新「计算估值」
           </div>
           <div class="field" style="margin-top: 12px">
             <el-checkbox v-model="form.principalExchange">本金交割(到期两腿互换名义,不含首期)</el-checkbox>
@@ -118,13 +111,8 @@
             默认取上一交易日(T-1)至 T 归因;估值日无完整行情(非交易日或超出行情数据覆盖)时结果为 0<br>
             未修改曲线时自动取 t0/t1 两日行情;修改右侧曲线后按该曲线归因(两日同形则曲线效应为 0)
           </div>
-          <div class="actions" style="margin-top: 8px">
-            <el-button size="small" @click="applyVendorPreset">对齐厂商口径</el-button>
-            <el-button size="small" @click="applyDefaultConvention">恢复默认口径</el-button>
-          </div>
           <div class="hint">
-            对齐厂商口径 = 连续复利 + T-1 定盘 + 本金交割,并在曲线无 7D 时注入 7D=当期定盘<br>
-            恢复默认口径 = 连续复利 + 当日定盘 + 本金交割(撤回预设注入的 7D 行)
+            统一口径:定盘取值固定当日(重置日当日上午定盘已发布);曲线自动补 7D 锚点行 = 当期定盘,为普通可编辑行,重新加载行情时按新定盘重建
           </div>
         </section>
 
@@ -384,7 +372,7 @@ const form = ref({
   fixedRate: 1.65, spread: 0.0,
   effectiveDate: '2026-06-01', maturityDate: '2029-06-01',
   fixedFreqMonths: 3, valuationDate: '2026-11-06', startDate: '',
-  discountBasis: 'cont', fixingLagBd: 0, principalExchange: true,
+  discountBasis: 'cont', principalExchange: true,  // 定盘取值固定当日,见 payload 里 fixing_lag_bd
 })
 const curveRows = ref([])
 let marketCurveSnapshot = null  // 最近一次加载行情的曲线快照(深拷贝,刻意不用响应式)
@@ -409,7 +397,7 @@ const benchLabel = computed(() => form.value.benchmark === 'FR007' ? 'FR007' : '
 const CHART_W = 640, CHART_H = 300
 const PAD = { l: 48, r: 30, t: 16, b: 34 }
 const hoverIdx = ref(null)
-// 曲线插值(定价参数,控件在左侧参数区):linear = 零利率线性(厂商对齐,默认);
+// 曲线插值(定价参数,控件在左侧参数区):linear = 零利率线性(默认);
 // hermite = 单调三次,内核贴现与浮动端重置利率预测均用之,切换后需重新「计算估值」;图随所选口径绘制
 const curveInterp = ref('linear')
 
@@ -445,7 +433,7 @@ const curveChart = computed(() => {
   const yOf = (r) => PAD.t + (hi - r) / (hi - lo) * H
 
   // 采样插值与左侧「曲线插值」参数同一口径,均严格穿过全部报价点,图 = 定价所用曲线:
-  // - 线性(默认):与后端 ZeroCurve 同法、两端平推(厂商对齐口径)
+  // - 线性(默认):与后端 ZeroCurve 同法、两端平推
   // - Hermite:单调三次(Fritsch–Carlson),与内核 _hermite_tangents 同法,
   //   节点切线连续、无过冲,端部切线取 0 与平推衔接(与中债曲线同族)
   const nQ = raw.length
@@ -597,36 +585,18 @@ function payload() {
     fixing_overrides: {},
     discount_basis: form.value.discountBasis,
     curve_interp: curveInterp.value,
-    fixing_lag_bd: form.value.fixingLagBd,
+    fixing_lag_bd: 0,  // 统一口径:当日定盘(厂商的 T-1 取法仅保留在 API 参数与后端测试中)
     principal_exchange: form.value.principalExchange,
   }
 }
 
-// 厂商口径预设:连续复利 + T-1 定盘 + 本金交割;曲线缺 7D 锚点行时按当期定盘补一行
-let presetInjectedRow = null  // 预设注入的 7D 行引用(恢复默认口径时撤回;用户改过利率则保留)
-
-function applyVendorPreset() {
-  form.value.discountBasis = 'cont'
-  form.value.fixingLagBd = 1
-  form.value.principalExchange = true
-  if (curveRows.value.length && !curveRows.value.some(r => r.tenor === '7D')) {
-    const anchorRate = fixingInfo.value ? fixingInfo.value.rate : curveRows.value[0].rate
-    presetInjectedRow = { tenor: '7D', rate: anchorRate }
-    curveRows.value.unshift(presetInjectedRow)
-  }
-}
-
-function applyDefaultConvention() {
-  form.value.discountBasis = 'cont'
-  form.value.fixingLagBd = 0
-  form.value.principalExchange = true
-  if (presetInjectedRow) {
-    const i = curveRows.value.indexOf(presetInjectedRow)
-    if (i >= 0 && curveRows.value[i].rate === presetInjectedRow.rate) {
-      curveRows.value.splice(i, 1)
-    }
-    presetInjectedRow = null
-  }
+// 统一口径:曲线缺 7D 锚点行时注入 7D=当期定盘(FR007 定盘本身即 7 天回购利率,期限匹配;
+// 仅影响首个报价期限之前的曲线段)。注入行为普通可编辑行,重新加载行情时按新定盘重建
+function injectSevenDayAnchor() {
+  if (!curveRows.value.length || curveRows.value.some(r => r.tenor === '7D')) return
+  const f = fixingInfo.value?.rate
+  const rate = f != null && Number.isFinite(+f) ? +f : curveRows.value[0].rate
+  curveRows.value.unshift({ tenor: '7D', rate })
 }
 
 // 归因曲线模式:表内曲线与加载行情时的快照逐行一致(或表内为空)→ 发空曲线,
@@ -672,8 +642,9 @@ async function onLoadMarket() {
   try {
     const m = await loadMarket(form.value.benchmark, form.value.valuationDate)
     curveRows.value = m.curve.map(x => ({ ...x }))
-    marketCurveSnapshot = JSON.parse(JSON.stringify(curveRows.value))
     fixingInfo.value = m.fixing
+    injectSevenDayAnchor()
+    marketCurveSnapshot = JSON.parse(JSON.stringify(curveRows.value))  // 快照含 7D 注入行
     syncFixedRateToFixing()
     marketApprox.value = m.calendar_approximate
     valueResult.value = null
