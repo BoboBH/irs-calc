@@ -110,6 +110,10 @@
             <el-button size="small" @click="applyVendorPreset">对齐厂商口径</el-button>
             <el-button size="small" @click="applyDefaultConvention">恢复默认口径</el-button>
           </div>
+          <div class="hint">
+            对齐厂商口径 = 连续复利 + T-1 定盘 + 本金交割,并在曲线无 7D 时注入 7D=当期定盘<br>
+            恢复默认口径 = 连续复利 + 当日定盘 + 本金交割(撤回预设注入的 7D 行)
+          </div>
         </section>
 
         <div class="actions">
@@ -311,7 +315,7 @@ const form = ref({
   fixedRate: 1.65, spread: 0.0,
   effectiveDate: '2026-06-01', maturityDate: '2029-06-01',
   fixedFreqMonths: 3, valuationDate: '2026-11-06', startDate: '',
-  discountBasis: 'simple', fixingLagBd: 0, principalExchange: true,
+  discountBasis: 'cont', fixingLagBd: 0, principalExchange: true,
 })
 const curveRows = ref([])
 let marketCurveSnapshot = null  // 最近一次加载行情的曲线快照(深拷贝,刻意不用响应式)
@@ -363,20 +367,30 @@ function payload() {
 }
 
 // 厂商口径预设:连续复利 + T-1 定盘 + 本金交割;曲线缺 7D 锚点行时按当期定盘补一行
+let presetInjectedRow = null  // 预设注入的 7D 行引用(恢复默认口径时撤回;用户改过利率则保留)
+
 function applyVendorPreset() {
   form.value.discountBasis = 'cont'
   form.value.fixingLagBd = 1
   form.value.principalExchange = true
   if (curveRows.value.length && !curveRows.value.some(r => r.tenor === '7D')) {
     const anchorRate = fixingInfo.value ? fixingInfo.value.rate : curveRows.value[0].rate
-    curveRows.value.unshift({ tenor: '7D', rate: anchorRate })
+    presetInjectedRow = { tenor: '7D', rate: anchorRate }
+    curveRows.value.unshift(presetInjectedRow)
   }
 }
 
 function applyDefaultConvention() {
-  form.value.discountBasis = 'simple'
+  form.value.discountBasis = 'cont'
   form.value.fixingLagBd = 0
   form.value.principalExchange = true
+  if (presetInjectedRow) {
+    const i = curveRows.value.indexOf(presetInjectedRow)
+    if (i >= 0 && curveRows.value[i].rate === presetInjectedRow.rate) {
+      curveRows.value.splice(i, 1)
+    }
+    presetInjectedRow = null
+  }
 }
 
 // 归因曲线模式:表内曲线与加载行情时的快照逐行一致(或表内为空)→ 发空曲线,
