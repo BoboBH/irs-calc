@@ -273,3 +273,53 @@ def test_value_swap_defaults_spread_and_freq():
     res_full = value_swap(TRADE, VAL, flat_curve(), CAL, BENCHMARKS["FR007"],
                           fixings={date(2026, 6, 1): 0.014})
     assert res_default["npv"] == res_full["npv"]
+
+
+def test_fixing_lag_bd_uses_prev_business_day_and_displays_it():
+    """T-1 定盘(厂商『定息日』口径):定盘观察日 = 重置日前推营业日,
+    sub_periods.reset_date 显示观察日;无滞后时同窗口用起点当日定盘。"""
+    spec = BENCHMARKS["FR007"]
+    sk = build_floating_skeleton(VAL, date(2026, 12, 1), CAL, spec)
+    fixings = {date(2026, 5, 29): 0.0134, date(2026, 6, 1): 0.0135,
+               date(2026, 6, 5): 0.0139, date(2026, 6, 8): 0.0136}
+    lag = price_floating_leg(sk, 100_000_000, VAL, flat_curve(), spec,
+                             fixings=fixings, fixing_lag_bd=1, calendar=CAL)
+    s = lag.rows[0].sub_periods
+    assert s[0].reset_date == date(2026, 5, 29)      # 周一窗口起点 → 前一营业日周五
+    assert s[0].source == "fixing" and s[0].rate == 0.0134
+    # 观察日 06-05 晚于估值日 06-01:该周定盘尚未发生 → 远期(厂商同口径)
+    assert s[1].reset_date == date(2026, 6, 5)
+    assert s[1].source == "forward"
+    base = price_floating_leg(sk, 100_000_000, VAL, flat_curve(), spec, fixings=fixings)
+    assert base.rows[0].sub_periods[0].rate == 0.0135
+    assert base.rows[0].sub_periods[1].source == "forward"  # 06-08 > 估值日 → 远期
+
+
+def test_fixing_lag_bd_without_calendar_raises():
+    spec = BENCHMARKS["FR007"]
+    sk = build_floating_skeleton(VAL, date(2026, 12, 1), CAL, spec)
+    try:
+        price_floating_leg(sk, 100_000_000, VAL, flat_curve(), spec,
+                           fixings={date(2026, 6, 1): 0.014}, fixing_lag_bd=1)
+        raise AssertionError("应当抛出 ValueError")
+    except ValueError:
+        pass
+
+
+def test_principal_exchange_adds_notional_to_both_last_rows():
+    """本金交割(不含首期):两腿末行各 +N、腿现值 +N·DF(mat),NPV 中两腿等额对冲不变;
+    rate 列仍为票息率(厂商同口径:含本金行的等效利率不含本金)。"""
+    spec = BENCHMARKS["FR007"]
+    fixings = {date(2026, 6, 1): 0.014}
+    N = 100_000_000
+    base = value_swap(TRADE, VAL, flat_curve(), CAL, spec, fixings=fixings)
+    res = value_swap(dict(TRADE, principal_exchange=True), VAL, flat_curve(),
+                     CAL, spec, fixings=fixings)
+    df_mat = flat_curve().df(date(2026, 12, 1))
+    assert res["fixed_rows"][-1].amount == base["fixed_rows"][-1].amount + N
+    assert res["floating_rows"][-1].amount == base["floating_rows"][-1].amount + N
+    assert res["fixed_rows"][0].amount == base["fixed_rows"][0].amount
+    assert abs(res["pv_fixed"] - base["pv_fixed"] - N * df_mat) < 1e-6
+    assert abs(res["pv_floating"] - base["pv_floating"] - N * df_mat) < 1e-6
+    assert abs(res["npv"] - base["npv"]) < 1e-6
+    assert res["fixed_rows"][-1].rate == base["fixed_rows"][-1].rate

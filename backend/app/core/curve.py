@@ -1,17 +1,23 @@
-"""互换零息曲线:单利贴现 DF=1/(1+y·τ),零利率线性插值,平推外推。
+"""互换零息曲线:零利率线性插值,平推外推,贴现口径可选。
+
+- discount_basis="simple"(默认):DF = 1/(1+y·τ),白皮书口径
+- discount_basis="cont":DF = exp(−y·τ),连续复利(与外部厂商系统对账用)
 
 扰动方式(供 DV01):
 - shifted_parallel: 全部期限点零利率 +bump
 - shifted_keys: 各关键期限点 +bump_k,相邻关键期限之间的点按 τ 线性(三角形)分摊,
   两端外侧取最近关键期限的 bump。平行移动 = 所有 bump_k 相等。
+扰动曲线继承原曲线的贴现口径。
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from datetime import date
 from typing import Sequence
 
 DAY_COUNT = 365
+DISCOUNT_BASES = ("simple", "cont")
 
 
 @dataclass(frozen=True)
@@ -22,7 +28,10 @@ class CurvePoint:
 
 
 class ZeroCurve:
-    def __init__(self, valuation_date: date, points: Sequence[CurvePoint]):
+    def __init__(self, valuation_date: date, points: Sequence[CurvePoint],
+                 discount_basis: str = "simple"):
+        if discount_basis not in DISCOUNT_BASES:
+            raise ValueError(f"贴现口径须为 {DISCOUNT_BASES},得到: {discount_basis!r}")
         pts = sorted(points, key=lambda p: p.date)
         if len(pts) < 1:
             raise ValueError("曲线至少需要一个期限点")
@@ -33,6 +42,7 @@ class ZeroCurve:
                 raise ValueError(f"期限点日期重复: {b.date}")
         self.valuation_date = valuation_date
         self.points = pts
+        self.discount_basis = discount_basis
 
     # ---- 内部 ----
     def _tau(self, d: date) -> float:
@@ -58,7 +68,7 @@ class ZeroCurve:
             tau = self._tau(p.date)
             b = self._interp_bump(key_taus, bumps, tau)
             new_points.append(CurvePoint(p.label, p.date, p.rate + b))
-        return ZeroCurve(self.valuation_date, new_points)
+        return ZeroCurve(self.valuation_date, new_points, self.discount_basis)
 
     # ---- 公开 ----
     @property
@@ -100,10 +110,13 @@ class ZeroCurve:
         tau = self._tau(d)
         if tau == 0:
             return 1.0
+        y = self.zero_rate(d)
         # τ<0(锚定日之前)按同式反推(DF>1):静态归因曲线(锚 t1)需对重置日
         # < t1 的子区间算远期;钳制会系统性压低远期、虚增残差。zero_rate 的 τ≤0
         # 平推保持不变,反推正好取首点利率。
-        return 1.0 / (1.0 + self.zero_rate(d) * tau)
+        if self.discount_basis == "cont":
+            return math.exp(-y * tau)
+        return 1.0 / (1.0 + y * tau)
 
     def forward(self, d1: date, d2: date, day_count: int = DAY_COUNT) -> float:
         if d2 <= d1:

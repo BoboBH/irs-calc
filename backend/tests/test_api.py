@@ -232,3 +232,64 @@ def test_attribution_default_window_earliest_trading_day_404():
     r = client.post("/api/attribution", json=req)
     assert r.status_code == 404
     assert "无更早行情" in r.json()["detail"]
+
+
+VENDOR_CURVE = [
+    {"tenor": "7D", "rate": 1.4},
+    {"tenor": "1M", "rate": 1.3838}, {"tenor": "3M", "rate": 1.3838},
+    {"tenor": "6M", "rate": 1.3713}, {"tenor": "9M", "rate": 1.3588},
+    {"tenor": "1Y", "rate": 1.3538}, {"tenor": "2Y", "rate": 1.3463},
+    {"tenor": "3Y", "rate": 1.3538}, {"tenor": "4Y", "rate": 1.3758},
+    {"tenor": "5Y", "rate": 1.3938}, {"tenor": "7Y", "rate": 1.45},
+    {"tenor": "10Y", "rate": 1.9},
+]
+
+
+def test_value_vendor_conventions_end_to_end():
+    """厂商口径端到端(连续复利 + T-1 定盘 + 本金交割 + 7D 曲线点):200,
+    首窗口定盘观察日 = 起息日前一营业日;结果与内核直接计算一致(双重记账);
+    浮动腿末行金额含本金。"""
+    from datetime import date as D, timedelta
+    from app.core.calendar import Calendar
+    from app.core.conventions import BENCHMARKS
+    from app.core.curve import CurvePoint, ZeroCurve
+    from app.core.pricing import value_swap
+    from app.core.schedule import add_tenor
+    from app.dataio import loader
+
+    req = {**VALUE_REQ, "valuation_date": "2026-11-05", "fixed_rate": 1.4,
+           "effective_date": "2026-06-01", "maturity_date": "2029-06-01",
+           "curve": VENDOR_CURVE, "fixing_overrides": {},
+           "discount_basis": "cont", "fixing_lag_bd": 1, "principal_exchange": True}
+    r = client.post("/api/value", json=req)
+    assert r.status_code == 200
+    body = r.json()
+    # ex-coupon 后首行 = 09-01 期,首窗口观察日 08-31 与厂商『定息日』列一致
+    assert body["cashflows"]["floating"][0]["sub_periods"][0]["reset_date"] == "2026-08-31"
+    assert body["cashflows"]["floating"][-1]["amount"] > 100_000_000  # 末行含本金
+
+    t = D(2025, 1, 1)
+    days = set()
+    while t <= D(2027, 12, 31):
+        if t.weekday() < 5:
+            days.add(t)
+        t += timedelta(days=1)
+    cal = Calendar(days)
+    anchor = D(2026, 11, 5)
+    pts = [CurvePoint(p["tenor"], add_tenor(anchor, p["tenor"]), p["rate"] / 100)
+           for p in VENDOR_CURVE]
+    curve = ZeroCurve(anchor, pts, "cont")
+    trade = {"benchmark": "FR007", "direction": "receiver", "notional": 1e8,
+             "fixed_rate": 0.014, "spread": 0.0, "effective_date": D(2026, 6, 1),
+             "maturity_date": D(2029, 6, 1), "fixed_freq_months": 3,
+             "fixing_lag_bd": 1, "principal_exchange": True}
+    expect = value_swap(trade, anchor, curve, cal, BENCHMARKS["FR007"],
+                        fixings=loader.fixings_for("FR007"))
+    assert body["npv"] == pytest.approx(expect["npv"])
+    assert body["pv_fixed"] == pytest.approx(expect["pv_fixed"])
+    assert body["pv_floating"] == pytest.approx(expect["pv_floating"])
+
+
+def test_value_rejects_bad_discount_basis_422():
+    r = client.post("/api/value", json={**VALUE_REQ, "discount_basis": "compound"})
+    assert r.status_code == 422

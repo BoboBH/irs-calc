@@ -125,3 +125,35 @@ def test_forward_straddling_valuation_flat_curve():
     expected = 0.014 / (1 + 0.014 * (-7 / 365))
     # 7 天 τ 的 (DF−1) 有灾难性抵消,ULP 噪声 ~1e-14,取 1e-12(仍远紧于 2e-3 级缺陷)
     assert abs(f - expected) < 1e-12
+
+
+def test_df_cont_basis_formula():
+    """cont 口径:DF = exp(−y·τ)(连续复利,与外部厂商系统对账用)。"""
+    import math
+    d = date(2026, 9, 1)
+    c = ZeroCurve(VAL, [CurvePoint("6M", date(2026, 12, 1), 0.014),
+                        CurvePoint("1Y", date(2027, 6, 1), 0.014),
+                        CurvePoint("2Y", date(2028, 6, 1), 0.014)], "cont")
+    assert c.df(d) == math.exp(-0.014 * 92 / 365)
+
+
+def test_df_cont_less_than_simple_for_positive_rate():
+    simple = make_flat_curve(0.014)
+    cont = ZeroCurve(VAL, simple.points, "cont")
+    d = date(2028, 6, 1)
+    assert cont.df(d) < simple.df(d)
+
+
+def test_shifted_curves_preserve_discount_basis():
+    cont = ZeroCurve(VAL, [CurvePoint("6M", date(2026, 12, 1), 0.014),
+                           CurvePoint("1Y", date(2027, 6, 1), 0.014),
+                           CurvePoint("2Y", date(2028, 6, 1), 0.014)], "cont")
+    assert cont.shifted_parallel(1e-4).discount_basis == "cont"
+    keys = [p.date for p in cont.points]
+    assert cont.shifted_keys(keys, [0.0, 1e-4, 0.0]).discount_basis == "cont"
+
+
+def test_constructor_rejects_unknown_discount_basis():
+    import pytest
+    with pytest.raises(ValueError):
+        ZeroCurve(VAL, [CurvePoint("6M", date(2026, 12, 1), 0.014)], "compound")

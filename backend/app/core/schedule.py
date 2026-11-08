@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 
 from app.core.calendar import Calendar
-from app.core.conventions import BenchmarkSpec
+from app.core.conventions import BenchmarkSpec, tenor_to_months
 
 
 @dataclass(frozen=True)
@@ -41,6 +41,14 @@ def add_months(d: date, months: int) -> date:
     last = [31, 29 if (y % 4 == 0 and (y % 100 != 0 or y % 400 == 0)) else 28,
             31, 30, 31, 30, 31, 31, 30, 31, 30, 31][m - 1]
     return date(y, m, min(d.day, last))
+
+
+def add_tenor(anchor: date, tenor: str) -> date:
+    """期限标签 → 日期:'7D' 等按日历日推进,'1M'/'10Y' 等按日历月(月末钳制)。"""
+    t = tenor.strip().upper()
+    if t.endswith("D"):
+        return anchor + timedelta(days=int(t[:-1]))
+    return add_months(anchor, tenor_to_months(t))
 
 
 def _build_periods(effective: date, maturity: date, freq_months: int,

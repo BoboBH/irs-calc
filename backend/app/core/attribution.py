@@ -9,11 +9,11 @@ from dataclasses import dataclass, field
 from datetime import date
 
 from app.core.calendar import Calendar
-from app.core.conventions import BenchmarkSpec, tenor_to_months, year_fraction
+from app.core.conventions import BenchmarkSpec, year_fraction
 from app.core.curve import CurvePoint, ZeroCurve
 from app.core.pricing import _lookup_fixing, value_swap
 from app.core.risk import krdv01, key_tenors_for, parallel_dv01
-from app.core.schedule import add_months, build_floating_skeleton
+from app.core.schedule import add_tenor, build_floating_skeleton
 
 
 @dataclass
@@ -36,31 +36,39 @@ class AttributionResult:
 
 
 def static_curve(curve_t0: ZeroCurve, valuation_t1: date) -> ZeroCurve:
-    """静态曲线 C̃_t1:各期限零息利率与 t0 相同,估值日推进至 t1。
+    """静态曲线 C̃_t1:各期限零息利率与 t0 相同,估值日推进至 t1,贴现口径继承。
 
-    假定期限点日期 = 估值日 + label 月数;传入不满足该假设的曲线时,
-    点日期按 label 月数重塑(label 为锚,constant maturity 口径)。
+    期限点日期按 label 重塑('7D' 按日历日、'1M'/'10Y' 按日历月;
+    label 为锚,constant maturity 口径)。
     """
-    pts = [CurvePoint(p.label, add_months(valuation_t1, tenor_to_months(p.label)), p.rate)
+    pts = [CurvePoint(p.label, add_tenor(valuation_t1, p.label), p.rate)
            for p in curve_t0.points]
-    return ZeroCurve(valuation_t1, pts)
+    return ZeroCurve(valuation_t1, pts, curve_t0.discount_basis)
 
 
 def _zero_at(curve: ZeroCurve, label: str) -> float:
     """曲线在其 label 期限上的零息利率(constant maturity 口径)。"""
-    return curve.zero_rate(add_months(curve.valuation_date, tenor_to_months(label)))
+    return curve.zero_rate(add_tenor(curve.valuation_date, label))
 
 
 def _current_reset_fixing(trade: dict, calendar: Calendar, spec: BenchmarkSpec,
                           fixings: dict[date, float], t0: date) -> float:
-    """L0:t0 所在重置子区间重置日的已定盘利率(白皮书 §票息效应)。"""
+    """L0:t0 所在重置子区间定盘观察日的已定盘利率(白皮书 §票息效应;
+    fixing_lag_bd 与定价侧一致前推)。"""
+    lag_bd = int(trade.get("fixing_lag_bd", 0) or 0)
     sk = build_floating_skeleton(trade["effective_date"], trade["maturity_date"],
                                  calendar, spec)
     for p in sk.periods:
         for sp in p.sub_periods:
             if sp.accrual_start <= t0 < sp.accrual_end:
-                return _lookup_fixing(fixings, sp.reset_date)
-    return _lookup_fixing(fixings, t0)
+                reset = sp.reset_date
+                for _ in range(lag_bd):
+                    reset = calendar.prev_business_day(reset)
+                return _lookup_fixing(fixings, reset)
+    reset = t0
+    for _ in range(lag_bd):
+        reset = calendar.prev_business_day(reset)
+    return _lookup_fixing(fixings, reset)
 
 
 def run_attribution(*, trade: dict, start_date: date, end_date: date,

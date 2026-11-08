@@ -83,9 +83,32 @@
                               placeholder="选填 默认上一交易日" />
             </div>
           </div>
+          <div class="grid2" style="margin-top: 12px">
+            <div class="field">
+              <label>贴现口径</label>
+              <el-radio-group v-model="form.discountBasis" class="seg">
+                <el-radio-button value="simple">单利</el-radio-button>
+                <el-radio-button value="cont">连续复利</el-radio-button>
+              </el-radio-group>
+            </div>
+            <div class="field">
+              <label>定盘取值</label>
+              <el-radio-group v-model="form.fixingLagBd" class="seg">
+                <el-radio-button :value="0">当日</el-radio-button>
+                <el-radio-button :value="1">T-1 营业日</el-radio-button>
+              </el-radio-group>
+            </div>
+          </div>
+          <div class="field" style="margin-top: 12px">
+            <el-checkbox v-model="form.principalExchange">本金交割(到期两腿互换名义,不含首期)</el-checkbox>
+          </div>
           <div class="hint">
             默认取上一交易日(T-1)至 T 归因;估值日无完整行情(非交易日或超出行情数据覆盖)时结果为 0<br>
             未修改曲线时自动取 t0/t1 两日行情;修改右侧曲线后按该曲线归因(两日同形则曲线效应为 0)
+          </div>
+          <div class="actions" style="margin-top: 8px">
+            <el-button size="small" @click="applyVendorPreset">对齐厂商口径</el-button>
+            <el-button size="small" @click="applyDefaultConvention">恢复默认口径</el-button>
           </div>
         </section>
 
@@ -288,6 +311,7 @@ const form = ref({
   fixedRate: 1.65, spread: 0.0,
   effectiveDate: '2026-06-01', maturityDate: '2026-12-01',
   fixedFreqMonths: 3, valuationDate: '2026-11-06', startDate: '',
+  discountBasis: 'simple', fixingLagBd: 0, principalExchange: false,
 })
 const curveRows = ref([])
 let marketCurveSnapshot = null  // 最近一次加载行情的曲线快照(深拷贝,刻意不用响应式)
@@ -332,7 +356,27 @@ function payload() {
     valuation_date: form.value.valuationDate,
     curve: curveRows.value.map(r => ({ tenor: r.tenor, rate: r.rate })),
     fixing_overrides: {},
+    discount_basis: form.value.discountBasis,
+    fixing_lag_bd: form.value.fixingLagBd,
+    principal_exchange: form.value.principalExchange,
   }
+}
+
+// 厂商口径预设:连续复利 + T-1 定盘 + 本金交割;曲线缺 7D 锚点行时按当期定盘补一行
+function applyVendorPreset() {
+  form.value.discountBasis = 'cont'
+  form.value.fixingLagBd = 1
+  form.value.principalExchange = true
+  if (curveRows.value.length && !curveRows.value.some(r => r.tenor === '7D')) {
+    const anchorRate = fixingInfo.value ? fixingInfo.value.rate : curveRows.value[0].rate
+    curveRows.value.unshift({ tenor: '7D', rate: anchorRate })
+  }
+}
+
+function applyDefaultConvention() {
+  form.value.discountBasis = 'simple'
+  form.value.fixingLagBd = 0
+  form.value.principalExchange = false
 }
 
 // 归因曲线模式:表内曲线与加载行情时的快照逐行一致(或表内为空)→ 发空曲线,

@@ -6,10 +6,10 @@ from datetime import date
 from app.core import risk
 from app.core.attribution import run_attribution
 from app.core.calendar import Calendar
-from app.core.conventions import BENCHMARKS, tenor_to_months
+from app.core.conventions import BENCHMARKS
 from app.core.curve import CurvePoint, ZeroCurve
 from app.core.pricing import value_swap
-from app.core.schedule import add_months
+from app.core.schedule import add_tenor
 from app.dataio import loader
 from app.dataio.loader import MarketDataError
 from app.api.schemas import AttributionRequest, TradeRequest
@@ -27,12 +27,13 @@ def load_fixings(benchmark: str, overrides: dict[date, float] | None = None) -> 
 
 
 def build_curve(benchmark: str, valuation_date: date,
-                curve_in: list | None) -> ZeroCurve:
+                curve_in: list | None, discount_basis: str = "simple") -> ZeroCurve:
     if curve_in:
-        pts = [CurvePoint(p.tenor, add_months(valuation_date, tenor_to_months(p.tenor)), p.rate / 100.0)
+        pts = [CurvePoint(p.tenor, add_tenor(valuation_date, p.tenor), p.rate / 100.0)
                for p in curve_in]
-        return ZeroCurve(valuation_date, pts)
-    return ZeroCurve(valuation_date, loader.curve_for(benchmark, valuation_date))
+        return ZeroCurve(valuation_date, pts, discount_basis)
+    return ZeroCurve(valuation_date, loader.curve_for(benchmark, valuation_date),
+                     discount_basis)
 
 
 def request_to_trade(req: TradeRequest) -> dict:
@@ -45,13 +46,15 @@ def request_to_trade(req: TradeRequest) -> dict:
         "effective_date": req.effective_date,
         "maturity_date": req.maturity_date,
         "fixed_freq_months": req.fixed_freq_months,
+        "fixing_lag_bd": req.fixing_lag_bd,
+        "principal_exchange": req.principal_exchange,
     }
 
 
 def do_value(req: TradeRequest, calendar: Calendar) -> dict:
     spec = BENCHMARKS[req.benchmark]
     trade = request_to_trade(req)
-    curve = build_curve(req.benchmark, req.valuation_date, req.curve)
+    curve = build_curve(req.benchmark, req.valuation_date, req.curve, req.discount_basis)
     fixings = load_fixings(req.benchmark, req.fixing_overrides)
     warnings = []
     if not req.curve:
@@ -145,8 +148,8 @@ def do_attribution(req: AttributionRequest, calendar: Calendar) -> dict:
         if not prior:
             raise MarketDataError(f"{spec.name} 估值日 {req.valuation_date} 无更早行情,无法构造 T-1")
         start = prior[-1]
-    curve_t0 = build_curve(req.benchmark, start, req.curve)
-    curve_t1 = build_curve(req.benchmark, req.valuation_date, req.curve)
+    curve_t0 = build_curve(req.benchmark, start, req.curve, req.discount_basis)
+    curve_t1 = build_curve(req.benchmark, req.valuation_date, req.curve, req.discount_basis)
     fixings = load_fixings(req.benchmark, req.fixing_overrides)
     res = run_attribution(trade=trade, start_date=start, end_date=req.valuation_date,
                           curve_t0=curve_t0, curve_t1=curve_t1, fixings=fixings,

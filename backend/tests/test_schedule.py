@@ -1,7 +1,12 @@
 from datetime import date
 from app.core.calendar import Calendar
 from app.core.conventions import BENCHMARKS
-from app.core.schedule import add_months, build_fixed_skeleton, build_floating_skeleton
+from app.core.schedule import (
+    add_months,
+    add_tenor,
+    build_fixed_skeleton,
+    build_floating_skeleton,
+)
 
 # 2026-05-25 ~ 2026-12-31 中所有工作日视为交易日(测试用简化日历)
 BD = set()
@@ -92,3 +97,14 @@ def test_schedule_skips_zero_length_period_after_adjustment():
     skf = build_floating_skeleton(date(2026, 5, 30), date(2026, 8, 31), CAL, BENCHMARKS["FR007"])
     assert all(p.accrual_start < p.accrual_end for p in skf.periods)
     assert skf.periods[-1].accrual_end == date(2026, 8, 31)
+
+
+def test_add_tenor_day_label():
+    """'7D' 按日历日推进(厂商曲线短端锚点用)。"""
+    assert add_tenor(date(2026, 11, 5), "7D") == date(2026, 11, 12)
+
+
+def test_add_tenor_month_and_year_labels():
+    assert add_tenor(date(2026, 11, 5), "1M") == date(2026, 12, 5)
+    assert add_tenor(date(2026, 11, 5), "3M") == date(2027, 2, 5)
+    assert add_tenor(date(2026, 11, 5), "10Y") == date(2036, 11, 5)
