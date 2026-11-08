@@ -53,7 +53,7 @@
           </el-form-item>
           <el-form-item label="归因起始日 t0">
             <el-date-picker v-model="form.startDate" type="date" value-format="YYYY-MM-DD"
-                            placeholder="选填,填了才能算归因" />
+                            placeholder="选填 默认上一交易日" />
           </el-form-item>
           <el-form-item>
             <el-button type="primary" plain :loading="loadingMarket" @click="onLoadMarket">
@@ -62,14 +62,14 @@
             <el-button type="primary" :loading="loadingValue" @click="onValue">
               计算估值
             </el-button>
-            <el-button type="success" :loading="loadingAttr" :disabled="!form.startDate"
-                       @click="onAttribution">
+            <el-button type="success" :loading="loadingAttr" @click="onAttribution">
               计算归因
             </el-button>
           </el-form-item>
         </el-form>
         <div style="color:#909399;font-size:13px;margin-bottom:8px">
-          未修改曲线时,归因自动取 t0/t1 两日行情;修改表内曲线后按该曲线归因(两日同形则曲线效应为 0)
+          默认取上一交易日(T-1)至 T 归因;估值日为非交易日时结果为 0<br>
+          未修改曲线时自动取 t0/t1 两日行情;修改表内曲线后按该曲线归因(两日同形则曲线效应为 0)
         </div>
         <el-alert v-if="marketApprox" type="warning" :closable="false"
                   title="当前日期在交易日历数据范围之外,日历按周末规则近似" style="margin-bottom: 8px" />
@@ -348,7 +348,8 @@ async function onValue() {
 async function onAttribution() {
   loadingAttr.value = true
   try {
-    const p = { ...payload(), start_date: form.value.startDate, curve: attributionCurve() }
+    // t0 留空发 null → 后端默认窗口(行情中 T-1 = max(d<T));T 非交易日返回全零 + 告警
+    const p = { ...payload(), start_date: form.value.startDate || null, curve: attributionCurve() }
     attributionResult.value = await postAttribution(p)
     warnings.value = attributionResult.value.warnings || []
     activeTab.value = 'attr'
