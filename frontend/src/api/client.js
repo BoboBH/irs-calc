@@ -10,3 +10,6 @@ export const postValue = (payload) =>
 
 export const postAttribution = (payload) =>
   http.post('/attribution', payload).then(r => r.data)
+
+export const postParRate = (payload) =>
+  http.post('/par_rate', payload).then(r => r.data)

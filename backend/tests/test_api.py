@@ -312,6 +312,41 @@ def test_value_curve_interp_bad_value_422():
     assert r.status_code == 422
 
 
+def test_par_rate_api_zero_npv_at_par():
+    """/api/par_rate:平缓曲线平价≈曲线水平;以平价作固定利率再估值 → NPV≈0
+    (端到端钉住装配层换算与内核两点线性法);方向无关;守卫与估值对称。"""
+    flat = {**VALUE_REQ, "curve": [{"tenor": "6M", "rate": 1.4},
+                                   {"tenor": "1Y", "rate": 1.4},
+                                   {"tenor": "2Y", "rate": 1.4}]}
+    r = client.post("/api/par_rate", json=flat)
+    assert r.status_code == 200
+    body = r.json()
+    assert body["par_rate"] == pytest.approx(1.4, abs=5e-3)  # 平缓曲线,略低于 1.4(远期递减)
+    assert body["annuity"] > 0 and body["pv_floating"] > 0
+
+    v = client.post("/api/value", json={**flat, "fixed_rate": body["par_rate"]})
+    assert v.status_code == 200
+    assert abs(v.json()["npv"]) < 1e-4
+
+    # 平价与方向无关(receiver/payer 同值)
+    r_payer = client.post("/api/par_rate", json={**flat, "direction": "payer"})
+    assert r_payer.status_code == 200
+    assert r_payer.json()["par_rate"] == pytest.approx(body["par_rate"])
+
+
+def test_par_rate_api_minimal_body_and_guards():
+    """子类缺省(receiver/1e8/固定利率)可省;估值日晚于到期日 → 400,与 /api/value 对称。"""
+    minimal = {"benchmark": "FR007", "effective_date": "2026-06-01",
+               "maturity_date": "2026-12-01", "valuation_date": "2026-06-01",
+               "curve": [{"tenor": "6M", "rate": 1.4}, {"tenor": "1Y", "rate": 1.4},
+                         {"tenor": "2Y", "rate": 1.4}]}
+    r = client.post("/api/par_rate", json=minimal)
+    assert r.status_code == 200
+    r2 = client.post("/api/par_rate", json={**minimal, "valuation_date": "2027-01-01"})
+    assert r2.status_code == 400
+    assert "估值日" in r2.json()["detail"]
+
+
 def test_value_spread_bp_unit_wiring():
     """spread_bp 单位为基点(25bp = 0.0025):浮动腿每期金额精确增加
     N·s·Στ(sub_periods 的 τ 之和),固定腿与指标利率不受影响;

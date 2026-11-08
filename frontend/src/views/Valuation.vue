@@ -50,7 +50,10 @@
           <div class="grid2">
             <div class="field">
               <label>固定利率 %</label>
-              <el-input-number v-model="form.fixedRate" :step="0.01" :precision="4" :controls="false" />
+              <div class="inline">
+                <el-input-number v-model="form.fixedRate" :step="0.01" :precision="4" :controls="false" />
+                <el-button :loading="parLoading" @click="onParRate">计算平价</el-button>
+              </div>
             </div>
             <div class="field">
               <label>付息频率</label>
@@ -340,7 +343,7 @@
 <script setup>
 import { computed, defineComponent, h, nextTick, onMounted, ref, watch } from 'vue'
 import { ElCard, ElMessage } from 'element-plus'
-import { loadMarket, postAttribution, postValue } from '../api/client'
+import { loadMarket, postAttribution, postParRate, postValue } from '../api/client'
 
 const StatCard = defineComponent({
   props: { title: String, v: Number },
@@ -685,6 +688,21 @@ async function onAttribution() {
     loadingAttr.value = false
   }
 }
+
+// 平价利率:使 NPV=0 的固定利率;与当前曲线/利差/日期口径一致,成功后回填输入框
+const parLoading = ref(false)
+async function onParRate() {
+  parLoading.value = true
+  try {
+    const r = await postParRate(payload())
+    form.value.fixedRate = Math.round(r.par_rate * 10000) / 10000
+    ElMessage.success(`平价利率 ${r.par_rate.toFixed(4)}%,已回填固定利率(重新「计算估值」应得 NPV≈0)`)
+  } catch (e) {
+    ElMessage.error(errText(e))
+  } finally {
+    parLoading.value = false
+  }
+}
 </script>
 
 <style scoped>
@@ -772,6 +790,8 @@ async function onAttribution() {
 .field :deep(.el-input-number),
 .field :deep(.el-select),
 .field :deep(.el-date-editor) { width: 100%; }
+.field .inline { display: flex; gap: 8px; align-items: center; }
+.field .inline :deep(.el-button) { flex: none; }
 .seg :deep(.el-radio-button__inner) { padding: 7px 12px; width: 100%; }
 .hint {
   font-size: 12px;

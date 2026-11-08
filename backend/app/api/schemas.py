@@ -43,6 +43,20 @@ class AttributionRequest(TradeRequest):
     start_date: date | None = None     # t0;缺省 = 默认窗口,自动取行情中 T-1 = max(d < T)
 
 
+class ParRateRequest(TradeRequest):
+    """平价利率请求:与估值同口径(曲线/利差/本金交割/定盘滞后等全部一致);
+    方向、名义、固定利率与平价无关(线性消去),给缺省仅凑字段完整性。"""
+    direction: Literal["receiver", "payer"] = "receiver"
+    notional: float = Field(default=100_000_000, gt=0)
+    fixed_rate: float = 1.65           # 忽略;平价即"使 NPV=0 的固定利率"
+
+
+class ParRateResponse(BaseModel):
+    par_rate: float                    # %:使 NPV=0 的固定利率
+    annuity: float                     # N·Στ·df:固定腿单位利率(小数 1.0)现值,元
+    pv_floating: float                 # 元
+
+
 class Krdv01Out(BaseModel):
     tenor: str
     dv01: float

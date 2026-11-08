@@ -8,7 +8,7 @@ from app.core.attribution import run_attribution
 from app.core.calendar import Calendar
 from app.core.conventions import BENCHMARKS
 from app.core.curve import CurvePoint, ZeroCurve
-from app.core.pricing import value_swap
+from app.core.pricing import par_rate, value_swap
 from app.core.schedule import add_tenor
 from app.dataio import loader
 from app.dataio.loader import MarketDataError
@@ -90,6 +90,21 @@ def do_value(req: TradeRequest, calendar: Calendar) -> dict:
             "floating": _rows(val["floating_rows"]),
         },
         "warnings": warnings,
+    }
+
+
+def do_par_rate(req: TradeRequest, calendar: Calendar) -> dict:
+    """平价利率:与估值同曲线/同利差/同定盘口径,固定利率不参与。"""
+    spec = BENCHMARKS[req.benchmark]
+    trade = request_to_trade(req)
+    curve = build_curve(req.benchmark, req.valuation_date, req.curve, req.discount_basis,
+                        req.curve_interp)
+    fixings = load_fixings(req.benchmark, req.fixing_overrides)
+    r = par_rate(trade, req.valuation_date, curve, calendar, spec, fixings=fixings)
+    return {
+        "par_rate": r["rate"] * 100.0,   # 内核小数 → 接口百分数
+        "annuity": r["annuity"],
+        "pv_floating": r["pv_floating"],
     }
 
 

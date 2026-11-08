@@ -1,9 +1,12 @@
 import datetime
 from datetime import date
+
+import pytest
 from app.core.calendar import Calendar
 from app.core.conventions import BENCHMARKS, year_fraction
 from app.core.curve import CurvePoint, ZeroCurve
-from app.core.pricing import MissingFixingError, price_fixed_leg, price_floating_leg, value_swap
+from app.core.pricing import (MissingFixingError, par_rate, price_fixed_leg,
+                              price_floating_leg, value_swap)
 from app.core.schedule import build_fixed_skeleton, build_floating_skeleton
 
 VAL = date(2026, 6, 1)
@@ -222,6 +225,33 @@ def test_par_swap_npv_near_zero():
     par = dict(TRADE, fixed_rate=k_star)
     res = value_swap(par, VAL, curve, CAL, spec, fixings=fixings)
     assert abs(res["npv"]) < 1e-4
+
+
+def test_par_rate_two_point_linearity():
+    """par_rate():两点线性法(R=0/R=1 各算一次)与手算年金公式严格一致;
+    代入平价后 NPV≈0;年金 = N·Στ·df;本金交割不改变平价(截距消去);
+    利差抬高浮动腿现值 → 平价同步抬高且仍满足 NPV≈0。"""
+    spec = BENCHMARKS["FR007"]
+    fixings = {date(2026, 6, 1): 0.014}
+    curve = flat_curve()
+    r = par_rate(TRADE, VAL, curve, CAL, spec, fixings=fixings)
+    res0 = value_swap(dict(TRADE, fixed_rate=0.0), VAL, curve, CAL, spec, fixings=fixings)
+    tau_df = sum(x.tau * x.df for x in res0["fixed_rows"])
+    assert r["annuity"] == pytest.approx(TRADE["notional"] * tau_df, rel=1e-12)
+    assert r["rate"] == pytest.approx(res0["pv_floating"] / (TRADE["notional"] * tau_df),
+                                      rel=1e-12)
+    assert abs(value_swap(dict(TRADE, fixed_rate=r["rate"]), VAL, curve, CAL, spec,
+                          fixings=fixings)["npv"]) < 1e-6
+
+    r_pe = par_rate(dict(TRADE, principal_exchange=True), VAL, curve, CAL, spec,
+                    fixings=fixings)
+    assert r_pe["rate"] == pytest.approx(r["rate"], abs=1e-12)
+
+    r_s = par_rate(dict(TRADE, spread=0.0025), VAL, curve, CAL, spec, fixings=fixings)
+    assert r_s["rate"] > r["rate"]
+    assert r_s["pv_floating"] > res0["pv_floating"]
+    assert abs(value_swap(dict(TRADE, spread=0.0025, fixed_rate=r_s["rate"]), VAL, curve,
+                          CAL, spec, fixings=fixings)["npv"]) < 1e-6
 
 
 def test_floating_fixing_cutoff_uses_forward_after_cutoff():

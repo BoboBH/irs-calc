@@ -200,6 +200,31 @@ def value_swap(trade: dict, valuation: date, curve: ZeroCurve, calendar: Calenda
     }
 
 
+def par_rate(trade: dict, valuation: date, curve: ZeroCurve, calendar: Calendar,
+             spec: BenchmarkSpec, *, fixings: dict[date, float]) -> dict:
+    """平价利率:使 NPV=0 的固定利率(小数)。
+
+    固定腿现值对 R 严格线性——每行 amount = N·R·τ·df,本金交割项与 R 无关——
+    故以 R=0 与 R=1 两点各算一次 value_swap,精确得到斜率(年金 N·Στ·df)与截距
+    (本金现值):R* = (pv_floating − pv_fixed(0)) / (pv_fixed(1) − pv_fixed(0))。
+    浮动腿现值(含 spread、既有定盘、本金交割)不随 R 变,方向/名义无关(两者消去)。
+    返回 dict:rate(小数)/ annuity(=N·Στ·df,固定腿单位利率现值,元)/
+    pv_floating(元)。
+    """
+    v0 = value_swap({**trade, "fixed_rate": 0.0}, valuation, curve, calendar, spec,
+                    fixings=fixings)
+    v1 = value_swap({**trade, "fixed_rate": 1.0}, valuation, curve, calendar, spec,
+                    fixings=fixings)
+    annuity = v1["pv_fixed"] - v0["pv_fixed"]
+    if annuity <= 0:
+        raise ValueError("平价利率不可解:固定腿年金非正(检查起息/到期日与曲线)")
+    return {
+        "rate": (v0["pv_floating"] - v0["pv_fixed"]) / annuity,
+        "annuity": annuity,
+        "pv_floating": v0["pv_floating"],
+    }
+
+
 def _apply_principal_exchange(notional: float, valuation: date, curve: ZeroCurve,
                               leg_fix: LegResult, leg_flt: LegResult) -> None:
     """到期本金交割(不含首期):两腿末行各叠加 N 本金(支付日在估值日之后才叠加)。

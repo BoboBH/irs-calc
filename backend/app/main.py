@@ -8,6 +8,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.api.attribution import router as attribution_router
 from app.api.market import router as market_router
+from app.api.par_rate import router as par_rate_router
 from app.api.valuation import router as value_router
 from app.logging_setup import setup_logging
 
@@ -16,6 +17,7 @@ app = FastAPI(title="IRS Calculator", version="0.1.0")
 app.include_router(market_router)
 app.include_router(value_router)
 app.include_router(attribution_router)
+app.include_router(par_rate_router)
 
 
 @app.get("/api/health")
