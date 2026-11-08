@@ -488,9 +488,9 @@ const curveChart = computed(() => {
     if (!prevTick || gapOk(prevTick, t)) { ticks.push(t); prevTick = t }
   })
   const fpt = fx ? { x: xOf(fx.days), y: yOf(fx.rate) } : null
-  // nice 刻度:1/2/5×10^k,约 3~4 格(直接携带 y 坐标,模板免再算)
-  const span = hi - lo, mag = 10 ** Math.floor(Math.log10(span / 3))
-  const nrm = span / 3 / mag
+  // nice 刻度:1/2/5×10^k,约 5~7 格,保证曲线最低点下方也落有刻度(直接携带 y 坐标,模板免再算)
+  const span = hi - lo, mag = 10 ** Math.floor(Math.log10(span / 5))
+  const nrm = span / 5 / mag
   const step = (nrm >= 5 ? 5 : nrm >= 2 ? 2 : 1) * mag
   const yTicks = []
   for (let v = Math.ceil(lo / step) * step; v <= hi + 1e-9; v += step) {
