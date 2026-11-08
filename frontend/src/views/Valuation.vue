@@ -51,7 +51,7 @@
             <div class="field">
               <label>固定利率 %</label>
               <div class="inline">
-                <el-input-number v-model="form.fixedRate" :step="0.01" :precision="4" :controls="false" />
+                <el-input-number v-model="form.fixedRate" :step="0.01" :precision="6" :controls="false" />
                 <el-button :loading="parLoading" @click="onParRate">计算平价</el-button>
               </div>
             </div>
@@ -695,8 +695,8 @@ async function onParRate() {
   parLoading.value = true
   try {
     const r = await postParRate(payload())
-    form.value.fixedRate = Math.round(r.par_rate * 10000) / 10000
-    ElMessage.success(`平价利率 ${r.par_rate.toFixed(4)}%,已回填固定利率(重新「计算估值」应得 NPV≈0)`)
+    form.value.fixedRate = Math.round(r.par_rate * 1e6) / 1e6   // 6 位小数(百分数),舍入残差上界 = 年金×5e-9
+    ElMessage.success(`平价利率 ${r.par_rate.toFixed(6)}%,已回填固定利率(重新「计算估值」应得 NPV≈0)`)
   } catch (e) {
     ElMessage.error(errText(e))
   } finally {
