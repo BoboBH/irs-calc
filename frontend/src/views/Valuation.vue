@@ -115,7 +115,7 @@
             未修改曲线时自动取 t0/t1 两日行情;修改右侧曲线后按该曲线归因(两日同形则曲线效应为 0)
           </div>
           <div class="hint">
-            统一口径:定盘取值固定当日(重置日当日上午定盘已发布);曲线自动补 7D 锚点行 = 当期定盘,为普通可编辑行,重新加载行情时按新定盘重建
+            定盘口径 = 合约标准 T-1:浮动利率取重置日前一营业日的定盘(CFETS 标准合约要素:首次利率确定日 = 起息日 − 1 个工作日,Shibor O/N 例外取当日);曲线自动补 7D 锚点行 = 当期定盘,为普通可编辑行,重新加载行情时按新定盘重建
           </div>
         </section>
 
@@ -375,7 +375,7 @@ const form = ref({
   fixedRate: 1.65, spread: 0.0,  // 浮动端利差,单位 bp(与 API spread_bp 同口径)
   effectiveDate: '2026-06-01', maturityDate: '2029-06-01',
   fixedFreqMonths: 3, valuationDate: '2026-11-06', startDate: '',
-  discountBasis: 'cont', principalExchange: true,  // 定盘取值固定当日,见 payload 里 fixing_lag_bd
+  discountBasis: 'cont', principalExchange: true,  // 定盘取值见 payload 里 fixing_lag_bd(合约标准 T-1)
 })
 const curveRows = ref([])
 let marketCurveSnapshot = null  // 最近一次加载行情的曲线快照(深拷贝,刻意不用响应式)
@@ -588,7 +588,7 @@ function payload() {
     fixing_overrides: {},
     discount_basis: form.value.discountBasis,
     curve_interp: curveInterp.value,
-    fixing_lag_bd: 0,  // 统一口径:当日定盘(厂商的 T-1 取法仅保留在 API 参数与后端测试中)
+    fixing_lag_bd: 1,  // 合约标准 T-1:定盘取重置日前一营业日(CFETS 标准合约要素,与厂商一致;0=当日可复现旧取法)
     principal_exchange: form.value.principalExchange,
   }
 }

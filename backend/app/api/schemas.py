@@ -35,7 +35,7 @@ class TradeRequest(BaseModel):
     fixing_overrides: dict[date, float] = {}  # {"2026-11-05": 1.37}(%);ISO 串自动转 date,坏串 422
     discount_basis: Literal["simple", "cont"] = "simple"  # 贴现:单利(白皮书)/连续复利(厂商对账)
     curve_interp: Literal["linear", "hermite"] = "linear"  # 曲线插值:零利率线性(厂商对齐)/单调三次 Hermite
-    fixing_lag_bd: int = Field(default=0, ge=0, le=5)     # 定盘观察日前推营业日数;0=当日,1=T-1(厂商口径)
+    fixing_lag_bd: int = Field(default=1, ge=0, le=5)     # 定盘观察日前推营业日数;合约标准=1(重置日前一营业日,CFETS 标准合约要素:首次利率确定日=起息日−1 工作日);0=当日(旧取法)
     principal_exchange: bool = False                      # 到期两腿互换本金,不含首期(厂商口径)
 
 

@@ -166,7 +166,7 @@ def value_swap(trade: dict, valuation: date, curve: ZeroCurve, calendar: Calenda
     trade 键:direction/notional/fixed_rate/spread/effective_date/maturity_date/
     fixed_freq_months(benchmark 键由调用方解析为 spec,本函数不读;
     direction: receiver|payer,receiver=收固定 ω=+1,其他值抛 ValueError)。
-    可选键:fixing_lag_bd(定盘观察日前推营业日数,0=当日,厂商口径=1)、
+    可选键:fixing_lag_bd(定盘观察日前推营业日数;合约标准=1=前一营业日,0=当日)、
     principal_exchange(True=到期两腿互换本金,不含首期)。
     贴现口径随 curve.discount_basis(调用方构建曲线时定)。
     返回 dict:npv/pv_fixed/pv_floating/omega/fixed_rows/floating_rows。

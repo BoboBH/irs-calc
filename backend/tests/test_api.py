@@ -49,6 +49,7 @@ def test_market_transition_period_fixing_none_and_calendar_approximate():
 VALUE_REQ = {
     "benchmark": "FR007", "direction": "receiver",
     "notional": 100_000_000, "fixed_rate": 1.65, "spread_bp": 0.0,
+    "fixing_lag_bd": 0,  # 显式钉住旧"当日"取法场景(接口缺省已改为合约标准 T-1,见 test_fixing_lag_bd_default_is_t1)
     "effective_date": "2026-06-01", "maturity_date": "2026-12-01",
     "fixed_freq_months": 3, "valuation_date": "2026-06-01",
     "curve": [
@@ -363,3 +364,23 @@ def test_value_spread_bp_unit_wiring():
     assert f25["rate"] == pytest.approx(f0["rate"])          # 指标利率不含 spread
     assert b25["pv_fixed"] == pytest.approx(b0["pv_fixed"])  # 固定腿不受利差影响
     assert b25["npv"] - b0["npv"] == pytest.approx(-(b25["pv_floating"] - b0["pv_floating"]))
+
+
+def test_fixing_lag_bd_default_is_t1():
+    """接口缺省 fixing_lag_bd = 1 = 合约标准(CFETS《互换通人民币利率互换产品手册》
+    标准合约要素:FR007/Shibor_3M 首次利率确定日 = 起息日 − 1 个工作日,利率确定日
+    适用上一营业日准则);缺省请求与显式 lag=1 逐位一致(NPV 与首期观察日),
+    与显式 lag=0 不同口径。"""
+    from app.api.schemas import TradeRequest
+
+    assert TradeRequest.model_fields["fixing_lag_bd"].default == 1
+    body = {k: v for k, v in VALUE_REQ.items() if k != "fixing_lag_bd"}
+    r_def = client.post("/api/value", json=body)
+    r_t1 = client.post("/api/value", json={**VALUE_REQ, "fixing_lag_bd": 1})
+    r_t0 = client.post("/api/value", json=VALUE_REQ)
+    assert r_def.status_code == r_t1.status_code == r_t0.status_code == 200
+    b_def, b_t1, b_t0 = r_def.json(), r_t1.json(), r_t0.json()
+    assert b_def["npv"] == pytest.approx(b_t1["npv"])
+    assert (b_def["cashflows"]["floating"][0]["sub_periods"][0]["reset_date"]
+            == b_t1["cashflows"]["floating"][0]["sub_periods"][0]["reset_date"])
+    assert b_def["npv"] != pytest.approx(b_t0["npv"])  # 首期观察日差一个营业日,定盘值不同
