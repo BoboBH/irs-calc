@@ -167,6 +167,13 @@
                   加载行情后显示收益率曲线
                 </div>
                 <div v-else class="curve-chart" @pointerleave="hoverIdx = null">
+                  <div class="interp-bar">
+                    <span class="muted">插值</span>
+                    <el-radio-group v-model="curveInterp" size="small">
+                      <el-radio-button value="linear">线性(定价口径)</el-radio-button>
+                      <el-radio-button value="hermite">Hermite 平滑</el-radio-button>
+                    </el-radio-group>
+                  </div>
                   <svg :viewBox="`0 0 ${CHART_W} ${CHART_H}`" width="100%" tabindex="0"
                        role="img" aria-label="零息收益率曲线"
                        @pointermove="onChartMove" @keydown="onChartKey">
@@ -397,6 +404,8 @@ const benchLabel = computed(() => form.value.benchmark === 'FR007' ? 'FR007' : '
 const CHART_W = 640, CHART_H = 300
 const PAD = { l: 48, r: 30, t: 16, b: 34 }
 const hoverIdx = ref(null)
+// 曲线插值方式:默认零利率线性(=定价内核口径,图=定价曲线),可切 Hermite 平滑对比
+const curveInterp = ref('linear')
 
 function tenorDays(tenor) {
   const m = /^(\d+)\s*([DdMmYy])$/.exec(String(tenor ?? '').trim())
@@ -429,37 +438,53 @@ const curveChart = computed(() => {
   const xOf = (d) => PAD.l + (d - d0) / (d1 - d0) * W
   const yOf = (r) => PAD.t + (hi - r) / (hi - lo) * H
 
-  // 显示层平滑:单调三次 Hermite(Fritsch–Carlson)过全部报价点,节点处切线连续、无过冲,
-  // 与中债/厂商曲线同族;端部切线取 0 与定价曲线两端平推衔接。
-  // 定价内核仍为零利率线性插值,NPV/DV01 不受影响(节点值与端部区间与定价一致,节点间为视觉平滑)。
+  // 采样插值两种口径,均严格穿过全部报价点:
+  // - 零利率线性(默认):与后端 ZeroCurve.zero_rate 同法、两端平推 —— 图 = 定价所用曲线
+  // - Hermite 平滑:单调三次(Fritsch–Carlson),节点切线连续、无过冲,端部切线取 0 与平推衔接;
+  //   与中债/厂商曲线同族。仅影响显示,NPV/DV01 固定用线性插值不受影响。
   const nQ = raw.length
-  const del = []
-  for (let i = 0; i < nQ - 1; i++)
-    del.push((raw[i + 1].rate - raw[i].rate) / (raw[i + 1].days - raw[i].days))
-  const tan = raw.map(() => 0)
-  for (let i = 1; i < nQ - 1; i++) {
-    if (del[i - 1] * del[i] <= 0) continue // 局部极值点切线取 0,防止过冲
-    const h0 = raw[i].days - raw[i - 1].days
-    const h1 = raw[i + 1].days - raw[i].days
-    const w1 = 2 * h1 + h0, w2 = h1 + 2 * h0
-    tan[i] = (w1 + w2) / (w1 / del[i - 1] + w2 / del[i])
-  }
-  const zeroAt = (d) => {
-    if (d <= raw[0].days) return raw[0].rate
-    if (d >= raw[nQ - 1].days) return raw[nQ - 1].rate
-    let i = 0
-    while (i < nQ - 2 && d > raw[i + 1].days) i++
-    const a = raw[i], b = raw[i + 1], h = b.days - a.days
-    const t = (d - a.days) / h, t2 = t * t, t3 = t2 * t
-    return (2 * t3 - 3 * t2 + 1) * a.rate + (t3 - 2 * t2 + t) * h * tan[i]
-         + (-2 * t3 + 3 * t2) * b.rate + (t3 - t2) * h * tan[i + 1]
+  let zeroAt
+  if (curveInterp.value === 'hermite') {
+    const del = []
+    for (let i = 0; i < nQ - 1; i++)
+      del.push((raw[i + 1].rate - raw[i].rate) / (raw[i + 1].days - raw[i].days))
+    const tan = raw.map(() => 0)
+    for (let i = 1; i < nQ - 1; i++) {
+      if (del[i - 1] * del[i] <= 0) continue // 局部极值点切线取 0,防止过冲
+      const h0 = raw[i].days - raw[i - 1].days
+      const h1 = raw[i + 1].days - raw[i].days
+      const w1 = 2 * h1 + h0, w2 = h1 + 2 * h0
+      tan[i] = (w1 + w2) / (w1 / del[i - 1] + w2 / del[i])
+    }
+    zeroAt = (d) => {
+      if (d <= raw[0].days) return raw[0].rate
+      if (d >= raw[nQ - 1].days) return raw[nQ - 1].rate
+      let i = 0
+      while (i < nQ - 2 && d > raw[i + 1].days) i++
+      const a = raw[i], b = raw[i + 1], h = b.days - a.days
+      const t = (d - a.days) / h, t2 = t * t, t3 = t2 * t
+      return (2 * t3 - 3 * t2 + 1) * a.rate + (t3 - 2 * t2 + t) * h * tan[i]
+           + (-2 * t3 + 3 * t2) * b.rate + (t3 - t2) * h * tan[i + 1]
+    }
+  } else {
+    zeroAt = (d) => {
+      if (d <= raw[0].days) return raw[0].rate
+      if (d >= raw[nQ - 1].days) return raw[nQ - 1].rate
+      for (let i = 0; i < nQ - 1; i++) {
+        if (d <= raw[i + 1].days) {
+          const w = (d - raw[i].days) / (raw[i + 1].days - raw[i].days)
+          return raw[i].rate + (raw[i + 1].rate - raw[i].rate) * w
+        }
+      }
+      return raw[nQ - 1].rate
+    }
   }
   const lblOf = (d) => {
     const a = raw.find(p => Math.abs(p.days - d) < 0.01)
     return a ? a.tenor : daysLabel(d)
   }
 
-  // 按基准的重置周期细采样(FR007 每周 / Shibor 3M 每季)替代报价点直连,配合 Hermite 视觉平滑
+  // 按基准的重置周期细采样(FR007 每周 / Shibor 3M 每季)替代报价点直连,逐点取所选插值
   const stepDays = form.value.benchmark === 'FR007' ? 7 : 3 * 30.4375
   const sampled = [{ d: d0, rate: zeroAt(d0) }]
   if (d1 > d0 + 1e-9) {
@@ -793,6 +818,7 @@ async function onAttribution() {
 .curve-right { flex: 1; min-width: 340px; display: flex; align-items: center; justify-content: center; }
 .curve-empty { height: 220px; display: flex; align-items: center; justify-content: center; }
 .curve-chart { position: relative; width: 100%; max-width: 760px; }
+.interp-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
 .curve-chart svg { display: block; outline: none; cursor: crosshair; }
 .curve-chart svg:focus-visible { outline: 1px solid var(--el-color-primary); outline-offset: 2px; }
 .chart-title { font-size: 12px; fill: var(--irs-text); }
