@@ -1,221 +1,256 @@
 <template>
-  <el-container style="max-width: 1280px; margin: 0 auto; padding: 16px">
-    <el-main>
-      <h2>利率互换计算器</h2>
+  <div class="page">
+    <header class="topbar">
+      <span class="brand-sq"></span>
+      <span class="brand">利率互换计算器</span>
+      <span class="brand-sub">IRS Pricing · DV01 · Campisi 归因</span>
+    </header>
 
-      <!-- ① 合约信息 -->
-      <el-card header="① 合约信息" shadow="never" style="margin-bottom: 12px">
-        <el-form :model="form" inline label-width="110px">
-          <el-form-item label="基准利率">
-            <el-select v-model="form.benchmark" style="width: 140px">
-              <el-option value="FR007" label="FR007" />
-              <el-option value="SHIBOR3M" label="SHIBOR 3M" />
-            </el-select>
-          </el-form-item>
-          <el-form-item label="头寸方向">
-            <el-select v-model="form.direction" style="width: 140px">
-              <el-option value="receiver" label="收固定" />
-              <el-option value="payer" label="付固定" />
-            </el-select>
-          </el-form-item>
-          <el-form-item label="名义本金">
-            <el-input-number v-model="form.notional" :min="1" :step="10000000"
-                             :controls="false" style="width: 160px" />
-          </el-form-item>
-          <el-form-item label="固定利率 %">
-            <el-input-number v-model="form.fixedRate" :step="0.01" :precision="4"
-                             :controls="false" style="width: 120px" />
-          </el-form-item>
-          <el-form-item label="利差 %">
-            <el-input-number v-model="form.spread" :step="0.0001" :precision="4"
-                             :controls="false" style="width: 120px" />
-          </el-form-item>
-          <el-form-item label="起息日">
-            <el-date-picker v-model="form.effectiveDate" type="date" value-format="YYYY-MM-DD" />
-          </el-form-item>
-          <el-form-item label="到期日">
-            <el-date-picker v-model="form.maturityDate" type="date" value-format="YYYY-MM-DD" />
-          </el-form-item>
-          <el-form-item label="固定腿频率">
-            <el-select v-model="form.fixedFreqMonths" style="width: 120px">
-              <el-option :value="3" label="季度" />
-              <el-option :value="12" label="年度" />
-            </el-select>
-          </el-form-item>
-        </el-form>
-      </el-card>
+    <div class="layout">
+      <!-- 左:输入区 -->
+      <aside class="input-panel">
+        <div class="swap-bar"><span>Swap 合约</span></div>
 
-      <!-- ② 市场数据 -->
-      <el-card header="② 市场数据" shadow="never" style="margin-bottom: 12px">
-        <el-form inline label-width="110px">
-          <el-form-item label="估值日 t1">
-            <el-date-picker v-model="form.valuationDate" type="date" value-format="YYYY-MM-DD" />
-          </el-form-item>
-          <el-form-item label="归因起始日 t0">
-            <el-date-picker v-model="form.startDate" type="date" value-format="YYYY-MM-DD"
-                            placeholder="选填 默认上一交易日" />
-          </el-form-item>
-          <el-form-item>
-            <el-button type="primary" plain :loading="loadingMarket" @click="onLoadMarket">
-              加载行情
-            </el-button>
-            <el-button type="primary" :loading="loadingValue" @click="onValue">
-              计算估值
-            </el-button>
-            <el-button type="success" :loading="loadingAttr" @click="onAttribution">
-              计算归因
-            </el-button>
-          </el-form-item>
-        </el-form>
-        <div style="color:#909399;font-size:13px;margin-bottom:8px">
-          默认取上一交易日(T-1)至 T 归因;估值日无完整行情(非交易日或超出行情数据覆盖)时结果为 0<br>
-          未修改曲线时自动取 t0/t1 两日行情;修改表内曲线后按该曲线归因(两日同形则曲线效应为 0)
-        </div>
-        <el-alert v-if="marketApprox" type="warning" :closable="false"
-                  title="当前日期在交易日历数据范围之外,日历按周末规则近似" style="margin-bottom: 8px" />
-        <el-table :data="curveRows" size="small" style="width: 100%">
-          <el-table-column prop="tenor" label="期限" width="90" />
-          <el-table-column label="零息利率 %">
-            <template #default="{ row }">
-              <el-input-number v-model="row.rate" :precision="4" :controls="false"
-                               size="small" style="width: 120px" />
-            </template>
-          </el-table-column>
-        </el-table>
-        <div v-if="fixingInfo" style="margin-top: 8px; color: #909399; font-size: 13px">
-          当期定盘:{{ form.benchmark === 'FR007' ? 'FR007' : 'Shibor 3M' }}
-          {{ fixingInfo.date }} = {{ fixingInfo.rate }}%
-        </div>
-      </el-card>
-
-      <!-- ③ 结果区 -->
-      <el-card v-if="warnings.length" shadow="never" style="margin-bottom: 12px">
-        <el-alert v-for="(w, i) in warnings" :key="i" :title="w" type="warning"
-                  :closable="false" style="margin-bottom: 4px" />
-      </el-card>
-
-      <el-card v-if="valueResult" shadow="never" style="margin-bottom: 12px">
-        <template #header>③ 估值结果</template>
-        <el-row :gutter="12">
-          <el-col :span="6"><stat-card title="NPV(元)" :v="valueResult.npv" /></el-col>
-          <el-col :span="6"><stat-card title="固定腿 PV(元)" :v="valueResult.pv_fixed" /></el-col>
-          <el-col :span="6"><stat-card title="浮动腿 PV(元)" :v="valueResult.pv_floating" /></el-col>
-          <el-col :span="6"><stat-card title="平行 DV01(元/bp)" :v="valueResult.dv01_parallel" /></el-col>
-        </el-row>
-      </el-card>
-
-      <el-tabs v-model="activeTab" style="margin-bottom: 24px">
-        <el-tab-pane label="关键期限 DV01" name="krdv">
-          <el-table v-if="valueResult" :data="valueResult.krdv01" size="small">
-            <template #empty>
-              <span style="color:#909399">剩余期限不足最小期限点,DV01 不适用</span>
-            </template>
-            <el-table-column prop="tenor" label="期限" width="90" />
-            <el-table-column prop="dv01" label="KRDV01(元/bp)">
-              <template #default="{ row }">{{ fmt(row.dv01) }}</template>
-            </el-table-column>
-          </el-table>
-          <div v-if="valueResult" style="color:#909399;font-size:13px;margin-top:6px">
-            合计 = {{ fmt(krdvSum) }};≈ 平行 DV01
+        <section class="group">
+          <div class="group-title">基础信息</div>
+          <div class="grid2">
+            <div class="field">
+              <label>挂钩基准</label>
+              <el-select v-model="form.benchmark">
+                <el-option value="FR007" label="FR007" />
+                <el-option value="SHIBOR3M" label="SHIBOR 3M" />
+              </el-select>
+            </div>
+            <div class="field">
+              <label>头寸方向</label>
+              <el-radio-group v-model="form.direction" class="seg">
+                <el-radio-button value="payer">付固定</el-radio-button>
+                <el-radio-button value="receiver">收固定</el-radio-button>
+              </el-radio-group>
+            </div>
           </div>
-        </el-tab-pane>
+          <div class="field" style="margin-top: 12px">
+            <label>名义本金(元)</label>
+            <el-input-number v-model="form.notional" :min="1" :step="10000000" :controls="false" />
+          </div>
+          <div class="grid2" style="margin-top: 12px">
+            <div class="field">
+              <label>起息日</label>
+              <el-date-picker v-model="form.effectiveDate" type="date" value-format="YYYY-MM-DD" />
+            </div>
+            <div class="field">
+              <label>到期日</label>
+              <el-date-picker v-model="form.maturityDate" type="date" value-format="YYYY-MM-DD" />
+            </div>
+          </div>
+        </section>
 
-        <el-tab-pane label="现金流明细" name="cf">
-          <template v-if="valueResult">
-            <h4>固定腿</h4>
-            <el-table :data="valueResult.cashflows.fixed" size="small" border>
-              <el-table-column prop="pay_date" label="支付日" width="110" />
-              <el-table-column prop="accrual_start" label="计息起" width="110" />
-              <el-table-column prop="accrual_end" label="计息止" width="110" />
-              <el-table-column prop="days" label="天数" width="70" />
-              <el-table-column prop="rate" label="利率 %">
-                <template #default="{ row }">{{ row.rate.toFixed(4) }}</template>
-              </el-table-column>
-              <el-table-column label="现金流(元)">
-                <template #default="{ row }">{{ fmt(row.amount) }}</template>
-              </el-table-column>
-              <el-table-column label="DF">
-                <template #default="{ row }">{{ row.df.toFixed(6) }}</template>
-              </el-table-column>
-              <el-table-column label="现值(元)">
-                <template #default="{ row }">{{ fmt(row.pv) }}</template>
-              </el-table-column>
-            </el-table>
-            <h4 style="margin-top:16px">浮动腿(展开行查看重置子区间)</h4>
-            <el-table :data="valueResult.cashflows.floating" size="small" border row-key="pay_date">
-              <el-table-column type="expand">
+        <section class="group">
+          <div class="group-title">固定端</div>
+          <div class="grid2">
+            <div class="field">
+              <label>固定利率 %</label>
+              <el-input-number v-model="form.fixedRate" :step="0.01" :precision="4" :controls="false" />
+            </div>
+            <div class="field">
+              <label>付息频率</label>
+              <el-select v-model="form.fixedFreqMonths">
+                <el-option :value="3" label="季度" />
+                <el-option :value="12" label="年度" />
+              </el-select>
+            </div>
+          </div>
+        </section>
+
+        <section class="group">
+          <div class="group-title">浮动端</div>
+          <div class="field">
+            <label>利差 %(叠加在基准之上)</label>
+            <el-input-number v-model="form.spread" :step="0.0001" :precision="4" :controls="false" />
+          </div>
+        </section>
+
+        <section class="group">
+          <div class="group-title">估值与归因</div>
+          <div class="grid2">
+            <div class="field">
+              <label>估值日 T</label>
+              <el-date-picker v-model="form.valuationDate" type="date" value-format="YYYY-MM-DD" />
+            </div>
+            <div class="field">
+              <label>归因起始日 t0</label>
+              <el-date-picker v-model="form.startDate" type="date" value-format="YYYY-MM-DD"
+                              placeholder="选填 默认上一交易日" />
+            </div>
+          </div>
+          <div class="hint">
+            默认取上一交易日(T-1)至 T 归因;估值日无完整行情(非交易日或超出行情数据覆盖)时结果为 0<br>
+            未修改曲线时自动取 t0/t1 两日行情;修改右侧曲线后按该曲线归因(两日同形则曲线效应为 0)
+          </div>
+        </section>
+
+        <div class="actions">
+          <el-button type="primary" plain :loading="loadingMarket" @click="onLoadMarket">加载行情</el-button>
+          <el-button type="primary" :loading="loadingValue" @click="onValue">计算估值</el-button>
+          <el-button type="success" :loading="loadingAttr" @click="onAttribution">计算归因</el-button>
+        </div>
+      </aside>
+
+      <!-- 右:展示区 -->
+      <main class="display-panel">
+        <el-card v-if="warnings.length" shadow="never" class="block-card">
+          <el-alert v-for="(w, i) in warnings" :key="i" :title="w" type="warning"
+                    :closable="false" style="margin-bottom: 4px" />
+        </el-card>
+
+        <el-card v-if="valueResult" shadow="never" class="block-card">
+          <template #header><span class="card-title">估值结果</span></template>
+          <el-row :gutter="12">
+            <el-col :span="6"><stat-card title="NPV(元)" :v="valueResult.npv" /></el-col>
+            <el-col :span="6"><stat-card title="固定腿 PV(元)" :v="valueResult.pv_fixed" /></el-col>
+            <el-col :span="6"><stat-card title="浮动腿 PV(元)" :v="valueResult.pv_floating" /></el-col>
+            <el-col :span="6"><stat-card title="平行 DV01(元/bp)" :v="valueResult.dv01_parallel" /></el-col>
+          </el-row>
+        </el-card>
+
+        <el-tabs v-model="activeTab" class="result-tabs">
+          <el-tab-pane label="市场曲线" name="curve">
+            <el-alert v-if="marketApprox" type="warning" :closable="false"
+                      title="当前日期在交易日历数据范围之外,日历按周末规则近似" style="margin-bottom: 8px" />
+            <el-table :data="curveRows" size="small" style="width: 100%">
+              <template #empty>
+                <span class="muted">点击左侧「加载行情」载入估值日曲线</span>
+              </template>
+              <el-table-column prop="tenor" label="期限" width="90" />
+              <el-table-column label="零息利率 %">
                 <template #default="{ row }">
-                  <el-table :data="row.sub_periods" size="small">
-                    <el-table-column prop="reset_date" label="重置日" width="110" />
-                    <el-table-column prop="accrual_start" label="起" width="110" />
-                    <el-table-column prop="accrual_end" label="止" width="110" />
-                    <el-table-column prop="days" label="天数" width="70" />
-                    <el-table-column label="利率 %">
-                      <template #default="{ row: sp }">{{ sp.rate.toFixed(4) }}</template>
-                    </el-table-column>
-                    <el-table-column prop="source" label="来源" width="90" />
-                  </el-table>
+                  <el-input-number v-model="row.rate" :precision="4" :controls="false"
+                                   size="small" style="width: 120px" />
                 </template>
               </el-table-column>
-              <el-table-column prop="pay_date" label="支付日" width="110" />
-              <el-table-column prop="days" label="天数" width="70" />
-              <el-table-column label="利率 %">
-                <template #default="{ row }">{{ row.rate.toFixed(4) }}</template>
-              </el-table-column>
-              <el-table-column label="现金流(元)">
-                <template #default="{ row }">{{ fmt(row.amount) }}</template>
-              </el-table-column>
-              <el-table-column label="DF">
-                <template #default="{ row }">{{ row.df.toFixed(6) }}</template>
-              </el-table-column>
-              <el-table-column label="现值(元)">
-                <template #default="{ row }">{{ fmt(row.pv) }}</template>
-              </el-table-column>
             </el-table>
-          </template>
-        </el-tab-pane>
+            <div v-if="fixingInfo" class="muted" style="margin-top: 8px">
+              当期定盘:{{ form.benchmark === 'FR007' ? 'FR007' : 'Shibor 3M' }}
+              {{ fixingInfo.date }} = {{ fixingInfo.rate }}%
+            </div>
+          </el-tab-pane>
 
-        <el-tab-pane label="Campisi 归因" name="attr" :disabled="!attributionResult">
-          <template v-if="attributionResult">
-            <el-row :gutter="12" style="margin-bottom: 12px">
-              <el-col :span="6"><stat-card title="全价损益 ΔNPV" :v="attributionResult.delta_npv" /></el-col>
-              <el-col :span="6"><stat-card title="区间现金流 CF" :v="attributionResult.cf" /></el-col>
-              <el-col :span="6">
-                <el-card shadow="never">
-                  <div style="color:#909399;font-size:13px">勾稽校验</div>
-                  <div :style="{ color: attributionResult.identity.ok ? '#67c23a' : '#f56c6c' }">
-                    {{ attributionResult.identity.ok ? '通过' : '失败' }}
-                    (差 {{ attributionResult.identity.diff === 0 ? '0'
-                          : attributionResult.identity.diff.toExponential(2) }})
-                  </div>
-                </el-card>
-              </el-col>
-            </el-row>
-            <el-table :data="attrRows" size="small" border>
-              <el-table-column prop="label" label="分项" width="220" />
-              <el-table-column label="金额(元)" align="right">
-                <template #default="{ row }">{{ fmt(row.value) }}</template>
-              </el-table-column>
-              <el-table-column label="含义" />
-            </el-table>
-            <h4 style="margin-top:16px">曲线效应明细</h4>
-            <el-table :data="attributionResult.detail" size="small" border>
+          <el-tab-pane label="关键期限 DV01" name="krdv">
+            <el-table v-if="valueResult" :data="valueResult.krdv01" size="small">
+              <template #empty>
+                <span class="muted">剩余期限不足最小期限点,DV01 不适用</span>
+              </template>
               <el-table-column prop="tenor" label="期限" width="90" />
-              <el-table-column label="Δy(bp)" align="right">
-                <template #default="{ row }">{{ row.dy_bp.toFixed(2) }}</template>
-              </el-table-column>
-              <el-table-column label="KRDV01(元/bp)" align="right">
-                <template #default="{ row }">{{ fmt(row.krdv01) }}</template>
-              </el-table-column>
-              <el-table-column label="贡献(元)" align="right">
-                <template #default="{ row }">{{ fmt(row.contribution) }}</template>
+              <el-table-column prop="dv01" label="KRDV01(元/bp)">
+                <template #default="{ row }">{{ fmt(row.dv01) }}</template>
               </el-table-column>
             </el-table>
-          </template>
-        </el-tab-pane>
-      </el-tabs>
-    </el-main>
-  </el-container>
+            <div v-if="valueResult" class="muted" style="margin-top: 6px">
+              合计 = {{ fmt(krdvSum) }};≈ 平行 DV01
+            </div>
+          </el-tab-pane>
+
+          <el-tab-pane label="现金流明细" name="cf">
+            <template v-if="valueResult">
+              <h4 class="section-h">固定腿</h4>
+              <el-table :data="valueResult.cashflows.fixed" size="small" border>
+                <el-table-column prop="pay_date" label="支付日" width="110" />
+                <el-table-column prop="accrual_start" label="计息起" width="110" />
+                <el-table-column prop="accrual_end" label="计息止" width="110" />
+                <el-table-column prop="days" label="天数" width="70" />
+                <el-table-column prop="rate" label="利率 %">
+                  <template #default="{ row }">{{ row.rate.toFixed(4) }}</template>
+                </el-table-column>
+                <el-table-column label="现金流(元)">
+                  <template #default="{ row }">{{ fmt(row.amount) }}</template>
+                </el-table-column>
+                <el-table-column label="DF">
+                  <template #default="{ row }">{{ row.df.toFixed(6) }}</template>
+                </el-table-column>
+                <el-table-column label="现值(元)">
+                  <template #default="{ row }">{{ fmt(row.pv) }}</template>
+                </el-table-column>
+              </el-table>
+              <h4 class="section-h" style="margin-top:16px">浮动腿(展开行查看重置子区间)</h4>
+              <el-table :data="valueResult.cashflows.floating" size="small" border row-key="pay_date">
+                <el-table-column type="expand">
+                  <template #default="{ row }">
+                    <el-table :data="row.sub_periods" size="small">
+                      <el-table-column prop="reset_date" label="重置日" width="110" />
+                      <el-table-column prop="accrual_start" label="起" width="110" />
+                      <el-table-column prop="accrual_end" label="止" width="110" />
+                      <el-table-column prop="days" label="天数" width="70" />
+                      <el-table-column label="利率 %">
+                        <template #default="{ row: sp }">{{ sp.rate.toFixed(4) }}</template>
+                      </el-table-column>
+                      <el-table-column prop="source" label="来源" width="90" />
+                    </el-table>
+                  </template>
+                </el-table-column>
+                <el-table-column prop="pay_date" label="支付日" width="110" />
+                <el-table-column prop="days" label="天数" width="70" />
+                <el-table-column label="利率 %">
+                  <template #default="{ row }">{{ row.rate.toFixed(4) }}</template>
+                </el-table-column>
+                <el-table-column label="现金流(元)">
+                  <template #default="{ row }">{{ fmt(row.amount) }}</template>
+                </el-table-column>
+                <el-table-column label="DF">
+                  <template #default="{ row }">{{ row.df.toFixed(6) }}</template>
+                </el-table-column>
+                <el-table-column label="现值(元)">
+                  <template #default="{ row }">{{ fmt(row.pv) }}</template>
+                </el-table-column>
+              </el-table>
+            </template>
+          </el-tab-pane>
+
+          <el-tab-pane label="Campisi 归因" name="attr" :disabled="!attributionResult">
+            <template v-if="attributionResult">
+              <el-row :gutter="12" style="margin-bottom: 12px">
+                <el-col :span="6"><stat-card title="全价损益 ΔNPV" :v="attributionResult.delta_npv" /></el-col>
+                <el-col :span="6"><stat-card title="区间现金流 CF" :v="attributionResult.cf" /></el-col>
+                <el-col :span="6">
+                  <el-card shadow="never">
+                    <div class="muted" style="font-size:13px">勾稽校验</div>
+                    <div :style="{ color: attributionResult.identity.ok ? '#3dbf9b' : '#e05252', fontSize: '18px', fontWeight: 600 }">
+                      {{ attributionResult.identity.ok ? '通过' : '失败' }}
+                      (差 {{ attributionResult.identity.diff === 0 ? '0'
+                            : attributionResult.identity.diff.toExponential(2) }})
+                    </div>
+                  </el-card>
+                </el-col>
+              </el-row>
+              <el-table :data="attrRows" size="small" border>
+                <el-table-column prop="label" label="分项" width="220" />
+                <el-table-column label="金额(元)" align="right">
+                  <template #default="{ row }">
+                    <span :style="{ color: pnlColor(row.value) }">{{ fmt(row.value) }}</span>
+                  </template>
+                </el-table-column>
+                <el-table-column label="含义" />
+              </el-table>
+              <h4 class="section-h" style="margin-top:16px">曲线效应明细</h4>
+              <el-table :data="attributionResult.detail" size="small" border>
+                <el-table-column prop="tenor" label="期限" width="90" />
+                <el-table-column label="Δy(bp)" align="right">
+                  <template #default="{ row }">{{ row.dy_bp.toFixed(2) }}</template>
+                </el-table-column>
+                <el-table-column label="KRDV01(元/bp)" align="right">
+                  <template #default="{ row }">{{ fmt(row.krdv01) }}</template>
+                </el-table-column>
+                <el-table-column label="贡献(元)" align="right">
+                  <template #default="{ row }">
+                    <span :style="{ color: pnlColor(row.contribution) }">{{ fmt(row.contribution) }}</span>
+                  </template>
+                </el-table-column>
+              </el-table>
+            </template>
+          </el-tab-pane>
+        </el-tabs>
+      </main>
+    </div>
+  </div>
 </template>
 
 <script setup>
@@ -228,13 +263,19 @@ const StatCard = defineComponent({
   setup(props) {
     // h() 的字符串标签不会解析全局注册组件(只走原生 createElement),必须传组件对象
     return () => h(ElCard, { shadow: 'never' }, () => [
-      h('div', { style: 'color:#909399;font-size:13px' }, props.title),
+      h('div', { class: 'muted', style: 'font-size:13px' }, props.title),
+      // 终端配色(参考设计):正数红、负数绿、零与空值中性
       h('div', {
-        style: `font-size:20px;font-weight:600;color:${props.v < 0 ? '#f56c6c' : '#303133'}`,
+        style: `font-size:20px;font-weight:600;color:${pnlColor(props.v)}`,
       }, formatNumber(props.v)),
     ])
   },
 })
+
+function pnlColor(v) {
+  if (v == null || Number.isNaN(v) || v === 0 || Object.is(v, -0)) return 'var(--irs-text)'
+  return v > 0 ? '#e05252' : '#3dbf9b'
+}
 
 function formatNumber(v) {
   if (v == null || Number.isNaN(v)) return '-'
@@ -258,7 +299,7 @@ const loadingAttr = ref(false)
 const valueResult = ref(null)
 const attributionResult = ref(null)
 const warnings = ref([])
-const activeTab = ref('krdv')
+const activeTab = ref('curve')
 
 const fmt = formatNumber
 const krdvSum = computed(() =>
@@ -360,3 +401,112 @@ async function onAttribution() {
   }
 }
 </script>
+
+<style scoped>
+.page {
+  --irs-bg: #161a22;
+  --irs-panel: #1e222c;
+  --irs-border: #2a2f3a;
+  --irs-text: #e8eaed;
+  --irs-muted: #8a919e;
+  --irs-orange: #e07040;
+  min-height: 100vh;
+  background: var(--irs-bg);
+  color: var(--irs-text);
+  font-size: 14px;
+}
+
+.topbar {
+  height: 48px;
+  background: var(--irs-panel);
+  border-bottom: 1px solid var(--irs-border);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 20px;
+}
+.brand-sq {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  background: linear-gradient(135deg, #1c3d5e, #3b7ddd);
+}
+.brand { font-size: 15px; font-weight: 600; }
+.brand-sub { font-size: 12px; color: var(--irs-muted); }
+
+.layout {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 16px;
+}
+
+/* ---- 左:输入区 ---- */
+.input-panel {
+  width: 400px;
+  flex: none;
+  background: var(--irs-panel);
+  border: 1px solid var(--irs-border);
+  border-radius: 8px;
+  padding: 16px;
+}
+.swap-bar {
+  background: linear-gradient(135deg, #1c3d5e, #2b6cb0);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  padding: 8px 12px;
+  border-radius: 6px;
+  margin-bottom: 16px;
+}
+.group { margin-bottom: 16px; }
+.group-title {
+  display: flex;
+  align-items: center;
+  font-size: 12px;
+  color: var(--irs-muted);
+  margin-bottom: 10px;
+}
+.group-title::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 1px;
+  background: var(--irs-orange);
+  margin-right: 6px;
+}
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.field label {
+  display: block;
+  font-size: 12px;
+  color: var(--irs-muted);
+  margin-bottom: 4px;
+}
+.field :deep(.el-input-number),
+.field :deep(.el-select),
+.field :deep(.el-date-editor) { width: 100%; }
+.seg :deep(.el-radio-button__inner) { padding: 7px 12px; width: 100%; }
+.hint {
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--irs-muted);
+  margin-top: 10px;
+}
+.actions { display: flex; gap: 8px; }
+.actions :deep(.el-button) { flex: 1; margin-left: 0; }
+
+/* ---- 右:展示区 ---- */
+.display-panel { flex: 1; min-width: 0; }
+.block-card { margin-bottom: 12px; }
+.card-title { font-size: 13px; color: var(--irs-orange); font-weight: 600; }
+.muted { color: var(--irs-muted); }
+.section-h { color: var(--irs-text); margin: 8px 0; font-size: 14px; }
+.result-tabs :deep(.el-tabs__item) { font-size: 14px; }
+
+@media (max-width: 1100px) {
+  .layout { flex-direction: column; }
+  .input-panel { width: auto; }
+}
+</style>
