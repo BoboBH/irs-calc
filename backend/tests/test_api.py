@@ -207,6 +207,8 @@ def test_attribution_default_window_non_trading_t_zero_response():
     """无 start_date、T=2026-11-07(周六,行情无此日)→ 200 全零归因(结构逐字段与正常
     一致:金额/效应 0、明细空表、identity ok/diff=0),warnings 含非交易日说明。"""
     req = {**VALUE_REQ, "valuation_date": "2026-11-07"}
+    # VALUE_REQ 携带显式 3 点曲线是有意的:钉住"默认 t0 + 显式曲线 + T 无完整行情
+    # → 仍全零(曲线被忽略)"语义,勿改为空曲线
     r = client.post("/api/attribution", json=req)
     assert r.status_code == 200
     b = r.json()

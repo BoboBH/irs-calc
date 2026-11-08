@@ -112,8 +112,9 @@ def _rows(rows):
 
 
 def _zero_attribution(valuation_date: date) -> dict:
-    """估值日非交易日(无行情)的全零归因:结构与 AttributionResponse 逐字段一致,
-    不进内核;金额/效应分量置 0、曲线效应明细空表、勾稽门放行。"""
+    """估值日无完整行情的全零归因:结构与 AttributionResponse 逐字段一致,
+    不进内核;金额/效应分量置 0、曲线效应明细空表、勾稽门放行。
+    注意:AttributionResponse/ValueResponse 增删字段时须同步此处置零(否则运行时 500)。"""
     return {
         "delta_npv": 0.0,
         "cf": 0.0,
@@ -127,7 +128,7 @@ def _zero_attribution(valuation_date: date) -> dict:
             "cashflows": {"fixed": [], "floating": []},
             "warnings": [],
         },
-        "warnings": [f"估值日 {valuation_date.isoformat()} 非交易日(无行情),归因各分项为 0"],
+        "warnings": [f"估值日 {valuation_date.isoformat()} 无完整行情(非交易日或超出行情数据覆盖),归因各分项为 0"],
     }
 
 
@@ -142,7 +143,7 @@ def do_attribution(req: AttributionRequest, calendar: Calendar) -> dict:
             return _zero_attribution(req.valuation_date)
         prior = [d for d in dates if d < req.valuation_date]
         if not prior:
-            raise MarketDataError(f"估值日 {req.valuation_date} 无更早行情,无法构造 T-1")
+            raise MarketDataError(f"{spec.name} 估值日 {req.valuation_date} 无更早行情,无法构造 T-1")
         start = prior[-1]
     curve_t0 = build_curve(req.benchmark, start, req.curve)
     curve_t1 = build_curve(req.benchmark, req.valuation_date, req.curve)

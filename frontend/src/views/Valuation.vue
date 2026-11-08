@@ -68,7 +68,7 @@
           </el-form-item>
         </el-form>
         <div style="color:#909399;font-size:13px;margin-bottom:8px">
-          默认取上一交易日(T-1)至 T 归因;估值日为非交易日时结果为 0<br>
+          默认取上一交易日(T-1)至 T 归因;估值日无完整行情(非交易日或超出行情数据覆盖)时结果为 0<br>
           未修改曲线时自动取 t0/t1 两日行情;修改表内曲线后按该曲线归因(两日同形则曲线效应为 0)
         </div>
         <el-alert v-if="marketApprox" type="warning" :closable="false"
