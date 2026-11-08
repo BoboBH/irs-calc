@@ -180,16 +180,19 @@
                           :y2="CHART_H - PAD.b" stroke="#383835" stroke-width="1" />
                     <text v-for="t in curveChart.yTicks" :key="`y${t.v}`" class="axis-text"
                           :x="PAD.l - 6" :y="t.y + 3" text-anchor="end">{{ t.v.toFixed(2) }}</text>
-                    <text v-for="p in curveChart.pts" :key="`x${p.tenor}`" class="axis-text"
+                    <text v-for="p in curveChart.ticks" :key="`x${p.tenor}`" class="axis-text"
                           :x="p.x" :y="CHART_H - PAD.b + 14" text-anchor="middle">{{ p.tenor }}</text>
                     <line v-if="hoverIdx != null" :x1="curveChart.pts[hoverIdx].x"
                           :x2="curveChart.pts[hoverIdx].x" :y1="PAD.t" :y2="CHART_H - PAD.b"
                           stroke="#383835" stroke-width="1" />
                     <polyline :points="curveChart.path" fill="none" stroke="#3987e5"
                               stroke-width="2" stroke-linejoin="round" stroke-linecap="round" />
-                    <circle v-for="(p, i) in curveChart.pts" :key="`d${p.tenor}`"
-                            :cx="p.x" :cy="p.y" r="4" fill="#3987e5"
-                            :fill-opacity="hoverIdx == null || hoverIdx === i ? 1 : 0.45"
+                    <circle v-if="hoverIdx != null" :cx="curveChart.pts[hoverIdx].x"
+                            :cy="curveChart.pts[hoverIdx].y" r="4" fill="#3987e5"
+                            stroke="var(--el-bg-color)" stroke-width="2" />
+                    <circle v-if="curveChart.pts.length"
+                            :cx="curveChart.pts[curveChart.pts.length - 1].x"
+                            :cy="curveChart.pts[curveChart.pts.length - 1].y" r="4" fill="#3987e5"
                             stroke="var(--el-bg-color)" stroke-width="2" />
                     <text v-if="curveChart.pts.length" class="curve-lbl" text-anchor="end"
                           :x="curveChart.pts[curveChart.pts.length - 1].x + 2"
@@ -209,7 +212,7 @@
                   <div v-if="hoverIdx != null" class="curve-tip"
                        :class="tipClass" :style="tipStyle">
                     <div class="tip-val">{{ curveChart.pts[hoverIdx].rate.toFixed(4) }}%</div>
-                    <div class="tip-key"><span class="key-line"></span>{{ benchLabel }} {{ curveChart.pts[hoverIdx].tenor }}</div>
+                    <div class="tip-key"><span class="key-line"></span>{{ benchLabel }} {{ curveChart.pts[hoverIdx].lbl }}</div>
                   </div>
                 </div>
               </div>
@@ -335,7 +338,7 @@
 </template>
 
 <script setup>
-import { computed, defineComponent, h, ref } from 'vue'
+import { computed, defineComponent, h, nextTick, onMounted, ref, watch } from 'vue'
 import { ElCard, ElMessage } from 'element-plus'
 import { loadMarket, postAttribution, postValue } from '../api/client'
 
@@ -402,6 +405,10 @@ function tenorDays(tenor) {
   return /D/i.test(m[2]) ? n : /M/i.test(m[2]) ? n * 30.4375 : n * 365.25
 }
 
+function daysLabel(d) {
+  return d < 365.25 ? `${Math.round(d)}D` : `${(d / 365.25).toFixed(2)}Y`
+}
+
 const curveChart = computed(() => {
   const raw = curveRows.value
     .filter(r => r.tenor && Number.isFinite(+r.rate))
@@ -410,7 +417,7 @@ const curveChart = computed(() => {
     .sort((a, b) => a.days - b.days)
   const fx = fixingInfo.value && Number.isFinite(+fixingInfo.value.rate)
     ? { days: 7, rate: +fixingInfo.value.rate } : null
-  if (!raw.length) return { pts: [], fpt: null, yTicks: [], path: '' }
+  if (!raw.length) return { pts: [], ticks: [], fpt: null, yTicks: [], path: '' }
 
   let lo = Math.min(...raw.map(p => p.rate)), hi = Math.max(...raw.map(p => p.rate))
   if (fx) { lo = Math.min(lo, fx.rate); hi = Math.max(hi, fx.rate) }
@@ -419,15 +426,55 @@ const curveChart = computed(() => {
   const W = CHART_W - PAD.l - PAD.r, H = CHART_H - PAD.t - PAD.b
   const d0 = fx ? Math.min(fx.days, raw[0].days) : raw[0].days
   const d1 = raw.length > 1 ? raw[raw.length - 1].days : d0 + 1
-  const pts = raw.map(p => ({
-    ...p,
-    x: PAD.l + (p.days - d0) / (d1 - d0) * W,
-    y: PAD.t + (hi - p.rate) / (hi - lo) * H,
+  const xOf = (d) => PAD.l + (d - d0) / (d1 - d0) * W
+  const yOf = (r) => PAD.t + (hi - r) / (hi - lo) * H
+
+  // 与后端 ZeroCurve.zero_rate 同法:零利率线性插值、两端平推 —— 图上呈现的即定价所用曲线
+  const zeroAt = (d) => {
+    if (d <= raw[0].days) return raw[0].rate
+    if (d >= raw[raw.length - 1].days) return raw[raw.length - 1].rate
+    for (let i = 0; i < raw.length - 1; i++) {
+      if (d <= raw[i + 1].days) {
+        const w = (d - raw[i].days) / (raw[i + 1].days - raw[i].days)
+        return raw[i].rate + (raw[i + 1].rate - raw[i].rate) * w
+      }
+    }
+    return raw[raw.length - 1].rate
+  }
+  const lblOf = (d) => {
+    const a = raw.find(p => Math.abs(p.days - d) < 0.01)
+    return a ? a.tenor : daysLabel(d)
+  }
+
+  // 按基准的重置周期细采样(FR007 每周 / Shibor 3M 每季)替代报价点直连,折线视觉平滑
+  const stepDays = form.value.benchmark === 'FR007' ? 7 : 3 * 30.4375
+  const sampled = [{ d: d0, rate: zeroAt(d0) }]
+  if (d1 > d0 + 1e-9) {
+    for (let d = d0 + stepDays; d < d1 - 1e-9; d += stepDays) sampled.push({ d, rate: zeroAt(d) })
+    if (d1 - sampled[sampled.length - 1].d > 1e-6) sampled.push({ d: d1, rate: zeroAt(d1) })
+  }
+  const pts = sampled.map(p => ({
+    days: p.d, rate: p.rate, lbl: lblOf(p.d), x: xOf(p.d), y: yOf(p.rate),
   }))
-  const fpt = fx ? {
-    x: PAD.l + (fx.days - d0) / (d1 - d0) * W,
-    y: PAD.t + (hi - fx.rate) / (hi - lo) * H,
-  } : null
+  // x 轴刻度取报价期限点;按估算文字宽度避让,短端过密时跳过,首末刻度必显
+  const estW = (s) => s.length * 7.2 + 4
+  const gapOk = (a, b) => b.x - a.x >= (estW(a.tenor) + estW(b.tenor)) / 2 + 8
+  const ticks = []
+  let prevTick = null
+  raw.forEach((p, i) => {
+    const t = { tenor: p.tenor, x: xOf(p.days) }
+    const isLast = i === raw.length - 1
+    if (isLast) {
+      while (prevTick && !gapOk(prevTick, t)) {
+        ticks.pop()
+        prevTick = ticks[ticks.length - 1] || null
+      }
+      ticks.push(t)
+      return
+    }
+    if (!prevTick || gapOk(prevTick, t)) { ticks.push(t); prevTick = t }
+  })
+  const fpt = fx ? { x: xOf(fx.days), y: yOf(fx.rate) } : null
   // nice 刻度:1/2/5×10^k,约 3~4 格(直接携带 y 坐标,模板免再算)
   const span = hi - lo, mag = 10 ** Math.floor(Math.log10(span / 3))
   const nrm = span / 3 / mag
@@ -436,7 +483,10 @@ const curveChart = computed(() => {
   for (let v = Math.ceil(lo / step) * step; v <= hi + 1e-9; v += step) {
     yTicks.push({ v: +v.toFixed(8), y: PAD.t + (hi - v) / (hi - lo) * H })
   }
-  return { pts, fpt, yTicks, path: pts.map(p => `${p.x.toFixed(2)},${p.y.toFixed(2)}`).join(' ') }
+  return {
+    pts, ticks, fpt, yTicks,
+    path: pts.map(p => `${p.x.toFixed(2)},${p.y.toFixed(2)}`).join(' '),
+  }
 })
 
 const tipStyle = computed(() => {
@@ -553,6 +603,25 @@ function errText(e) {
   return `请求失败(${e?.response?.status ?? e?.message ?? '未知错误'})`
 }
 
+// 固定利率默认跟随当期定盘;用户手动改过之后不再自动覆盖
+let fixedRateTouched = false
+let suppressFixedRateWatch = false
+watch(() => form.value.fixedRate, () => {
+  if (!suppressFixedRateWatch) fixedRateTouched = true
+})
+
+function syncFixedRateToFixing() {
+  const r = fixingInfo.value?.rate
+  if (!fixedRateTouched && r != null && Number.isFinite(+r)) {
+    suppressFixedRateWatch = true
+    form.value.fixedRate = +r
+    nextTick(() => { suppressFixedRateWatch = false })
+  }
+}
+
+// 进入页面自动加载行情(固定利率同步取当期定盘)
+onMounted(() => { onLoadMarket() })
+
 async function onLoadMarket() {
   loadingMarket.value = true
   try {
@@ -560,6 +629,7 @@ async function onLoadMarket() {
     curveRows.value = m.curve.map(x => ({ ...x }))
     marketCurveSnapshot = JSON.parse(JSON.stringify(curveRows.value))
     fixingInfo.value = m.fixing
+    syncFixedRateToFixing()
     marketApprox.value = m.calendar_approximate
     valueResult.value = null
     attributionResult.value = null
