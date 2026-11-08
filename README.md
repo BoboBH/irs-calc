@@ -63,9 +63,11 @@ cd backend && ./.venv/Scripts/python.exe -m pytest
 
 ## 数据依赖
 
-运行与测试需要 `data/` 目录下两个 CSV 就位(data/ 不入库属有意决策):
+运行与测试需要 `data/` 目录下的 CSV(**已入库**便于复现与验证;行情为快照数据,刷新行情时直接覆盖文件):
 
 - `rate_value.csv`:估值曲线(按基准/日期的期限点零息利率)
 - `rate_info.csv`:期限与定盘信息
 
-`FR007ON行情.csv`、`SHIBOR3M定盘行情.csv` 当前 loader 不读取。
+`FR007ON行情.csv`、`SHIBOR3M定盘行情.csv` 为原始行情留档,当前 loader 不读取。
+
+定价/归因方法论参考:`docs/九鞅科技利率互换Campisi归因方法白皮书 V1 20261106.pdf`(已入库)。
