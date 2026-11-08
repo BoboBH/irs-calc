@@ -33,6 +33,7 @@ class TradeRequest(BaseModel):
     curve: list[CurvePointIn] = []     # 空 = 按估值日自动从行情加载;期限支持 7D 等日历日标签
     fixing_overrides: dict[date, float] = {}  # {"2026-11-05": 1.37}(%);ISO 串自动转 date,坏串 422
     discount_basis: Literal["simple", "cont"] = "simple"  # 贴现:单利(白皮书)/连续复利(厂商对账)
+    curve_interp: Literal["linear", "hermite"] = "linear"  # 曲线插值:零利率线性(厂商对齐)/单调三次 Hermite
     fixing_lag_bd: int = Field(default=0, ge=0, le=5)     # 定盘观察日前推营业日数;0=当日,1=T-1(厂商口径)
     principal_exchange: bool = False                      # 到期两腿互换本金,不含首期(厂商口径)
 

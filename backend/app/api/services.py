@@ -27,13 +27,14 @@ def load_fixings(benchmark: str, overrides: dict[date, float] | None = None) -> 
 
 
 def build_curve(benchmark: str, valuation_date: date,
-                curve_in: list | None, discount_basis: str = "simple") -> ZeroCurve:
+                curve_in: list | None, discount_basis: str = "simple",
+                interp: str = "linear") -> ZeroCurve:
     if curve_in:
         pts = [CurvePoint(p.tenor, add_tenor(valuation_date, p.tenor), p.rate / 100.0)
                for p in curve_in]
-        return ZeroCurve(valuation_date, pts, discount_basis)
+        return ZeroCurve(valuation_date, pts, discount_basis, interp)
     return ZeroCurve(valuation_date, loader.curve_for(benchmark, valuation_date),
-                     discount_basis)
+                     discount_basis, interp)
 
 
 def request_to_trade(req: TradeRequest) -> dict:
@@ -54,7 +55,8 @@ def request_to_trade(req: TradeRequest) -> dict:
 def do_value(req: TradeRequest, calendar: Calendar) -> dict:
     spec = BENCHMARKS[req.benchmark]
     trade = request_to_trade(req)
-    curve = build_curve(req.benchmark, req.valuation_date, req.curve, req.discount_basis)
+    curve = build_curve(req.benchmark, req.valuation_date, req.curve, req.discount_basis,
+                        req.curve_interp)
     fixings = load_fixings(req.benchmark, req.fixing_overrides)
     warnings = []
     if not req.curve:
@@ -148,8 +150,10 @@ def do_attribution(req: AttributionRequest, calendar: Calendar) -> dict:
         if not prior:
             raise MarketDataError(f"{spec.name} 估值日 {req.valuation_date} 无更早行情,无法构造 T-1")
         start = prior[-1]
-    curve_t0 = build_curve(req.benchmark, start, req.curve, req.discount_basis)
-    curve_t1 = build_curve(req.benchmark, req.valuation_date, req.curve, req.discount_basis)
+    curve_t0 = build_curve(req.benchmark, start, req.curve, req.discount_basis,
+                           req.curve_interp)
+    curve_t1 = build_curve(req.benchmark, req.valuation_date, req.curve, req.discount_basis,
+                           req.curve_interp)
     fixings = load_fixings(req.benchmark, req.fixing_overrides)
     res = run_attribution(trade=trade, start_date=start, end_date=req.valuation_date,
                           curve_t0=curve_t0, curve_t1=curve_t1, fixings=fixings,

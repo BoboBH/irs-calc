@@ -1,4 +1,8 @@
-"""互换零息曲线:零利率线性插值,平推外推,贴现口径可选。
+"""互换零息曲线:零利率插值方法可选,平推外推,贴现口径可选。
+
+- interp="linear"(默认):报价点之间零利率线性插值 —— 厂商逐分位对齐口径
+- interp="hermite":单调三次 Hermite(Fritsch–Carlson),节点切线连续、无过冲,
+  端点切线取 0 与平推衔接;贴现与浮动端重置利率预测(远期)都随之变化
 
 - discount_basis="simple"(默认):DF = 1/(1+y·τ),白皮书口径
 - discount_basis="cont":DF = exp(−y·τ),连续复利(与外部厂商系统对账用)
@@ -7,7 +11,7 @@
 - shifted_parallel: 全部期限点零利率 +bump
 - shifted_keys: 各关键期限点 +bump_k,相邻关键期限之间的点按 τ 线性(三角形)分摊,
   两端外侧取最近关键期限的 bump。平行移动 = 所有 bump_k 相等。
-扰动曲线继承原曲线的贴现口径。
+扰动曲线继承原曲线的插值方法与贴现口径。
 """
 from __future__ import annotations
 
@@ -18,6 +22,7 @@ from typing import Sequence
 
 DAY_COUNT = 365
 DISCOUNT_BASES = ("simple", "cont")
+INTERP_METHODS = ("linear", "hermite")
 
 
 @dataclass(frozen=True)
@@ -29,9 +34,11 @@ class CurvePoint:
 
 class ZeroCurve:
     def __init__(self, valuation_date: date, points: Sequence[CurvePoint],
-                 discount_basis: str = "simple"):
+                 discount_basis: str = "simple", interp: str = "linear"):
         if discount_basis not in DISCOUNT_BASES:
             raise ValueError(f"贴现口径须为 {DISCOUNT_BASES},得到: {discount_basis!r}")
+        if interp not in INTERP_METHODS:
+            raise ValueError(f"插值方法须为 {INTERP_METHODS},得到: {interp!r}")
         pts = sorted(points, key=lambda p: p.date)
         if len(pts) < 1:
             raise ValueError("曲线至少需要一个期限点")
@@ -43,6 +50,30 @@ class ZeroCurve:
         self.valuation_date = valuation_date
         self.points = pts
         self.discount_basis = discount_basis
+        self.interp = interp
+        self._taus = [(p.date - valuation_date).days / DAY_COUNT for p in pts]
+        self._rates = [p.rate for p in pts]
+        self._tans = (self._hermite_tangents(self._taus, self._rates)
+                      if interp == "hermite" else None)
+
+    @staticmethod
+    def _hermite_tangents(taus: Sequence[float], rates: Sequence[float]) -> list[float]:
+        """Fritsch–Carlson 单调三次切线(与前端显示层同法):
+        区间割率为 del;内部点两侧割率变号(局部极值)时切线取 0 防过冲,
+        否则取加权调和平均 w1=2h1+h0, w2=h1+2h0;端点切线 0,与两端平推衔接。"""
+        n = len(taus)
+        tan = [0.0] * n
+        dels = [(rates[i + 1] - rates[i]) / (taus[i + 1] - taus[i]) for i in range(n - 1)]
+        for i in range(1, n - 1):
+            d0, d1 = dels[i - 1], dels[i]
+            if d0 * d1 <= 0:
+                continue
+            h0 = taus[i] - taus[i - 1]
+            h1 = taus[i + 1] - taus[i]
+            w1 = 2 * h1 + h0
+            w2 = h1 + 2 * h0
+            tan[i] = (w1 + w2) / (w1 / d0 + w2 / d1)
+        return tan
 
     # ---- 内部 ----
     def _tau(self, d: date) -> float:
@@ -68,7 +99,7 @@ class ZeroCurve:
             tau = self._tau(p.date)
             b = self._interp_bump(key_taus, bumps, tau)
             new_points.append(CurvePoint(p.label, p.date, p.rate + b))
-        return ZeroCurve(self.valuation_date, new_points, self.discount_basis)
+        return ZeroCurve(self.valuation_date, new_points, self.discount_basis, self.interp)
 
     # ---- 公开 ----
     @property
@@ -94,14 +125,22 @@ class ZeroCurve:
         tau = self._tau(d)
         if tau <= 0:
             return self.points[0].rate
-        taus = [self._tau(p.date) for p in self.points]
-        rates = [p.rate for p in self.points]
+        taus, rates = self._taus, self._rates
         if tau >= taus[-1]:
             return rates[-1]
         if tau <= taus[0]:
             return rates[0]
         for i in range(len(taus) - 1):
             if taus[i] <= tau <= taus[i + 1]:
+                if self.interp == "hermite":
+                    h = taus[i + 1] - taus[i]
+                    t = (tau - taus[i]) / h
+                    t2, t3 = t * t, t * t * t
+                    m0, m1 = self._tans[i], self._tans[i + 1]
+                    return ((2 * t3 - 3 * t2 + 1) * rates[i]
+                            + (t3 - 2 * t2 + t) * h * m0
+                            + (-2 * t3 + 3 * t2) * rates[i + 1]
+                            + (t3 - t2) * h * m1)
                 w = (tau - taus[i]) / (taus[i + 1] - taus[i])
                 return rates[i] + (rates[i + 1] - rates[i]) * w
         raise AssertionError

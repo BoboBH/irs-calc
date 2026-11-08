@@ -99,6 +99,18 @@
               </el-radio-group>
             </div>
           </div>
+          <div class="grid2" style="margin-top: 12px">
+            <div class="field">
+              <label>曲线插值</label>
+              <el-radio-group v-model="curveInterp" class="seg">
+                <el-radio-button value="linear">线性</el-radio-button>
+                <el-radio-button value="hermite">Hermite</el-radio-button>
+              </el-radio-group>
+            </div>
+          </div>
+          <div class="hint" style="margin-top: 4px">
+            插值作用于整条定价曲线:贴现与浮动端未来重置利率预测均随之变化(NPV/DV01 受影响);线性 = 厂商对齐口径,切换后需重新「计算估值」
+          </div>
           <div class="field" style="margin-top: 12px">
             <el-checkbox v-model="form.principalExchange">本金交割(到期两腿互换名义,不含首期)</el-checkbox>
           </div>
@@ -167,13 +179,6 @@
                   加载行情后显示收益率曲线
                 </div>
                 <div v-else class="curve-chart" @pointerleave="hoverIdx = null">
-                  <div class="interp-bar">
-                    <span class="muted">插值</span>
-                    <el-radio-group v-model="curveInterp" size="small">
-                      <el-radio-button value="linear">线性(定价口径)</el-radio-button>
-                      <el-radio-button value="hermite">Hermite 平滑</el-radio-button>
-                    </el-radio-group>
-                  </div>
                   <svg :viewBox="`0 0 ${CHART_W} ${CHART_H}`" width="100%" tabindex="0"
                        role="img" aria-label="零息收益率曲线"
                        @pointermove="onChartMove" @keydown="onChartKey">
@@ -404,7 +409,8 @@ const benchLabel = computed(() => form.value.benchmark === 'FR007' ? 'FR007' : '
 const CHART_W = 640, CHART_H = 300
 const PAD = { l: 48, r: 30, t: 16, b: 34 }
 const hoverIdx = ref(null)
-// 曲线插值方式:默认零利率线性(=定价内核口径,图=定价曲线),可切 Hermite 平滑对比
+// 曲线插值(定价参数,控件在左侧参数区):linear = 零利率线性(厂商对齐,默认);
+// hermite = 单调三次,内核贴现与浮动端重置利率预测均用之,切换后需重新「计算估值」;图随所选口径绘制
 const curveInterp = ref('linear')
 
 function tenorDays(tenor) {
@@ -438,10 +444,10 @@ const curveChart = computed(() => {
   const xOf = (d) => PAD.l + (d - d0) / (d1 - d0) * W
   const yOf = (r) => PAD.t + (hi - r) / (hi - lo) * H
 
-  // 采样插值两种口径,均严格穿过全部报价点:
-  // - 零利率线性(默认):与后端 ZeroCurve.zero_rate 同法、两端平推 —— 图 = 定价所用曲线
-  // - Hermite 平滑:单调三次(Fritsch–Carlson),节点切线连续、无过冲,端部切线取 0 与平推衔接;
-  //   与中债/厂商曲线同族。仅影响显示,NPV/DV01 固定用线性插值不受影响。
+  // 采样插值与左侧「曲线插值」参数同一口径,均严格穿过全部报价点,图 = 定价所用曲线:
+  // - 线性(默认):与后端 ZeroCurve 同法、两端平推(厂商对齐口径)
+  // - Hermite:单调三次(Fritsch–Carlson),与内核 _hermite_tangents 同法,
+  //   节点切线连续、无过冲,端部切线取 0 与平推衔接(与中债曲线同族)
   const nQ = raw.length
   let zeroAt
   if (curveInterp.value === 'hermite') {
@@ -590,6 +596,7 @@ function payload() {
     curve: curveRows.value.map(r => ({ tenor: r.tenor, rate: r.rate })),
     fixing_overrides: {},
     discount_basis: form.value.discountBasis,
+    curve_interp: curveInterp.value,
     fixing_lag_bd: form.value.fixingLagBd,
     principal_exchange: form.value.principalExchange,
   }
@@ -818,7 +825,6 @@ async function onAttribution() {
 .curve-right { flex: 1; min-width: 340px; display: flex; align-items: center; justify-content: center; }
 .curve-empty { height: 220px; display: flex; align-items: center; justify-content: center; }
 .curve-chart { position: relative; width: 100%; max-width: 760px; }
-.interp-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
 .curve-chart svg { display: block; outline: none; cursor: crosshair; }
 .curve-chart svg:focus-visible { outline: 1px solid var(--el-color-primary); outline-offset: 2px; }
 .chart-title { font-size: 12px; fill: var(--irs-text); }

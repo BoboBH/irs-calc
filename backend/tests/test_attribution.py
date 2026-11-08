@@ -136,3 +136,13 @@ def test_attribution_warns_when_maturity_beyond_last_key():
                           fixings=FIXINGS, calendar=CAL, spec=spec)
     # TRADE 到期 2028-06-01,最后关键期限 1Y(2027-06-08)→ 折入告警
     assert any("折入" in w for w in res.warnings)
+
+
+def test_static_curve_preserves_interp():
+    from datetime import date as D
+    from app.core.attribution import static_curve
+    from app.core.curve import CurvePoint, ZeroCurve
+    c = ZeroCurve(D(2026, 6, 1), [CurvePoint("6M", D(2026, 12, 1), 0.014),
+                                  CurvePoint("1Y", D(2027, 6, 1), 0.020)],
+                  "cont", "hermite")
+    assert static_curve(c, D(2026, 11, 6)).interp == "hermite"

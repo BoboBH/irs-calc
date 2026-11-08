@@ -293,3 +293,20 @@ def test_value_vendor_conventions_end_to_end():
 def test_value_rejects_bad_discount_basis_422():
     r = client.post("/api/value", json={**VALUE_REQ, "discount_basis": "compound"})
     assert r.status_code == 422
+
+
+def test_value_curve_interp_hermite_changes_npv():
+    """curve_interp=hermite:请求被接受,非平曲线上 NPV 随插值变化;缺省 linear。"""
+    sloped = {**VALUE_REQ, "maturity_date": "2027-06-01",  # 越过 6M 节点,现金流进入插值区
+              "curve": [{"tenor": "6M", "rate": 1.4},
+                                     {"tenor": "1Y", "rate": 2.0},
+                                     {"tenor": "2Y", "rate": 2.5}]}
+    r_lin = client.post("/api/value", json=sloped)
+    r_h = client.post("/api/value", json={**sloped, "curve_interp": "hermite"})
+    assert r_lin.status_code == r_h.status_code == 200
+    assert r_lin.json()["npv"] != r_h.json()["npv"]
+
+
+def test_value_curve_interp_bad_value_422():
+    r = client.post("/api/value", json={**VALUE_REQ, "curve_interp": "cubic"})
+    assert r.status_code == 422

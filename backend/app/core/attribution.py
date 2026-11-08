@@ -43,7 +43,7 @@ def static_curve(curve_t0: ZeroCurve, valuation_t1: date) -> ZeroCurve:
     """
     pts = [CurvePoint(p.label, add_tenor(valuation_t1, p.label), p.rate)
            for p in curve_t0.points]
-    return ZeroCurve(valuation_t1, pts, curve_t0.discount_basis)
+    return ZeroCurve(valuation_t1, pts, curve_t0.discount_basis, curve_t0.interp)
 
 
 def _zero_at(curve: ZeroCurve, label: str) -> float:

@@ -323,3 +323,26 @@ def test_principal_exchange_adds_notional_to_both_last_rows():
     assert abs(res["pv_floating"] - base["pv_floating"] - N * df_mat) < 1e-6
     assert abs(res["npv"] - base["npv"]) < 1e-6
     assert res["fixed_rows"][-1].rate == base["fixed_rows"][-1].rate
+
+
+def test_floating_reset_rates_follow_curve_interp():
+    """浮动端未来重置利率用曲线远期:切换曲线插值(linear→hermite)后远期重置利率变化,
+    定盘子区间(真实定盘)不受影响。"""
+    spec = BENCHMARKS["FR007"]
+    # 到期越过 6M 节点 → 部分周重置落入 6M–1Y 插值区(否则全在平推区两法一致)
+    sk = build_floating_skeleton(VAL, date(2027, 6, 1), CAL, spec)
+    N = 100_000_000
+    fixings = {date(2026, 6, 1): 0.0135}
+    pts = [CurvePoint("6M", date(2026, 12, 1), 0.014),
+           CurvePoint("1Y", date(2027, 6, 1), 0.020),
+           CurvePoint("2Y", date(2028, 6, 1), 0.025)]
+    leg_lin = price_floating_leg(sk, N, VAL, ZeroCurve(VAL, pts, "cont"), spec,
+                                 fixings=fixings)
+    leg_h = price_floating_leg(sk, N, VAL, ZeroCurve(VAL, pts, "cont", "hermite"), spec,
+                               fixings=fixings)
+    assert leg_h.rows[0].sub_periods[0].rate == leg_lin.rows[0].sub_periods[0].rate == 0.0135
+    rates_lin = [sp.rate for r in leg_lin.rows for sp in r.sub_periods
+                 if sp.source == "forward"]
+    rates_h = [sp.rate for r in leg_h.rows for sp in r.sub_periods
+               if sp.source == "forward"]
+    assert len(rates_lin) > 0 and rates_lin != rates_h
