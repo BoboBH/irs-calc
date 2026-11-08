@@ -144,21 +144,75 @@
           <el-tab-pane label="市场曲线" name="curve">
             <el-alert v-if="marketApprox" type="warning" :closable="false"
                       title="当前日期在交易日历数据范围之外,日历按周末规则近似" style="margin-bottom: 8px" />
-            <el-table :data="curveRows" size="small" style="width: 100%">
-              <template #empty>
-                <span class="muted">点击左侧「加载行情」载入估值日曲线</span>
-              </template>
-              <el-table-column prop="tenor" label="期限" width="90" />
-              <el-table-column label="零息利率 %">
-                <template #default="{ row }">
-                  <el-input-number v-model="row.rate" :precision="4" :controls="false"
-                                   size="small" style="width: 120px" />
-                </template>
-              </el-table-column>
-            </el-table>
-            <div v-if="fixingInfo" class="muted" style="margin-top: 8px">
-              当期定盘:{{ form.benchmark === 'FR007' ? 'FR007' : 'Shibor 3M' }}
-              {{ fixingInfo.date }} = {{ fixingInfo.rate }}%
+            <div class="curve-layout">
+              <div class="curve-left">
+                <el-table :data="curveRows" size="small" style="width: 100%">
+                  <template #empty>
+                    <span class="muted">点击左侧「加载行情」载入估值日曲线</span>
+                  </template>
+                  <el-table-column prop="tenor" label="期限" width="90" />
+                  <el-table-column label="零息利率 %">
+                    <template #default="{ row }">
+                      <el-input-number v-model="row.rate" :precision="4" :controls="false"
+                                       size="small" style="width: 120px" />
+                    </template>
+                  </el-table-column>
+                </el-table>
+                <div v-if="fixingInfo" class="fixing-chip muted">
+                  当期定盘 {{ benchLabel }} {{ fixingInfo.date }} = <b>{{ fixingInfo.rate }}%</b>
+                </div>
+              </div>
+              <div class="curve-right">
+                <div v-if="!curveChart.pts.length" class="muted curve-empty">
+                  加载行情后显示收益率曲线
+                </div>
+                <div v-else class="curve-chart" @pointerleave="hoverIdx = null">
+                  <svg :viewBox="`0 0 ${CHART_W} ${CHART_H}`" width="100%" tabindex="0"
+                       role="img" aria-label="零息收益率曲线"
+                       @pointermove="onChartMove" @keydown="onChartKey">
+                    <text class="chart-title" :x="PAD.l" :y="12">
+                      零息收益率曲线 · {{ benchLabel }} · {{ form.valuationDate }}
+                    </text>
+                    <line v-for="t in curveChart.yTicks" :key="`g${t.v}`"
+                          :x1="PAD.l" :x2="CHART_W - PAD.r" :y1="t.y" :y2="t.y"
+                          stroke="#2c2c2a" stroke-width="1" />
+                    <line :x1="PAD.l" :x2="CHART_W - PAD.r" :y1="CHART_H - PAD.b"
+                          :y2="CHART_H - PAD.b" stroke="#383835" stroke-width="1" />
+                    <text v-for="t in curveChart.yTicks" :key="`y${t.v}`" class="axis-text"
+                          :x="PAD.l - 6" :y="t.y + 3" text-anchor="end">{{ t.v.toFixed(2) }}</text>
+                    <text v-for="p in curveChart.pts" :key="`x${p.tenor}`" class="axis-text"
+                          :x="p.x" :y="CHART_H - PAD.b + 14" text-anchor="middle">{{ p.tenor }}</text>
+                    <line v-if="hoverIdx != null" :x1="curveChart.pts[hoverIdx].x"
+                          :x2="curveChart.pts[hoverIdx].x" :y1="PAD.t" :y2="CHART_H - PAD.b"
+                          stroke="#383835" stroke-width="1" />
+                    <polyline :points="curveChart.path" fill="none" stroke="#3987e5"
+                              stroke-width="2" stroke-linejoin="round" stroke-linecap="round" />
+                    <circle v-for="(p, i) in curveChart.pts" :key="`d${p.tenor}`"
+                            :cx="p.x" :cy="p.y" r="4" fill="#3987e5"
+                            :fill-opacity="hoverIdx == null || hoverIdx === i ? 1 : 0.45"
+                            stroke="var(--el-bg-color)" stroke-width="2" />
+                    <text v-if="curveChart.pts.length" class="curve-lbl" text-anchor="end"
+                          :x="curveChart.pts[curveChart.pts.length - 1].x + 2"
+                          :y="curveChart.pts[curveChart.pts.length - 1].y - 10">
+                      {{ curveChart.pts[curveChart.pts.length - 1].rate.toFixed(4) }}%
+                    </text>
+                    <g v-if="curveChart.fpt">
+                      <circle :cx="curveChart.fpt.x" :cy="curveChart.fpt.y" r="4.5"
+                              fill="#d95926" stroke="var(--el-bg-color)" stroke-width="2" />
+                      <text class="curve-lbl" :text-anchor="curveChart.fpt.x > CHART_W - 100 ? 'end' : 'start'"
+                            :x="curveChart.fpt.x + (curveChart.fpt.x > CHART_W - 100 ? -9 : 9)"
+                            :y="curveChart.fpt.y - 9">
+                        定盘 {{ fixingInfo.rate }}%
+                      </text>
+                    </g>
+                  </svg>
+                  <div v-if="hoverIdx != null" class="curve-tip"
+                       :class="tipClass" :style="tipStyle">
+                    <div class="tip-val">{{ curveChart.pts[hoverIdx].rate.toFixed(4) }}%</div>
+                    <div class="tip-key"><span class="key-line"></span>{{ benchLabel }} {{ curveChart.pts[hoverIdx].tenor }}</div>
+                  </div>
+                </div>
+              </div>
             </div>
           </el-tab-pane>
 
@@ -332,6 +386,93 @@ const activeTab = ref('curve')
 const fmt = formatNumber
 const krdvSum = computed(() =>
   valueResult.value ? valueResult.value.krdv01.reduce((s, x) => s + x.dv01, 0) : 0)
+
+const benchLabel = computed(() => form.value.benchmark === 'FR007' ? 'FR007' : 'Shibor 3M')
+
+// —— 收益率曲线图(左表右图;暗色 token:网格 #2c2c2a / 轴 #383835 / 轴字 #898781 /
+//    序列蓝 #3987e5 / 定盘橙 #d95926,均为 dataviz 暗色档已验证值)——
+const CHART_W = 640, CHART_H = 300
+const PAD = { l: 48, r: 30, t: 16, b: 34 }
+const hoverIdx = ref(null)
+
+function tenorDays(tenor) {
+  const m = /^(\d+)\s*([DdMmYy])$/.exec(String(tenor ?? '').trim())
+  if (!m) return NaN
+  const n = +m[1]
+  return /D/i.test(m[2]) ? n : /M/i.test(m[2]) ? n * 30.4375 : n * 365.25
+}
+
+const curveChart = computed(() => {
+  const raw = curveRows.value
+    .filter(r => r.tenor && Number.isFinite(+r.rate))
+    .map(r => ({ tenor: String(r.tenor).trim().toUpperCase(), rate: +r.rate, days: tenorDays(r.tenor) }))
+    .filter(p => Number.isFinite(p.days))
+    .sort((a, b) => a.days - b.days)
+  const fx = fixingInfo.value && Number.isFinite(+fixingInfo.value.rate)
+    ? { days: 7, rate: +fixingInfo.value.rate } : null
+  if (!raw.length) return { pts: [], fpt: null, yTicks: [], path: '' }
+
+  let lo = Math.min(...raw.map(p => p.rate)), hi = Math.max(...raw.map(p => p.rate))
+  if (fx) { lo = Math.min(lo, fx.rate); hi = Math.max(hi, fx.rate) }
+  if (hi - lo < 1e-9) { lo -= 0.05; hi += 0.05 }
+  const pad = (hi - lo) * 0.12; lo -= pad; hi += pad
+  const W = CHART_W - PAD.l - PAD.r, H = CHART_H - PAD.t - PAD.b
+  const d0 = fx ? Math.min(fx.days, raw[0].days) : raw[0].days
+  const d1 = raw.length > 1 ? raw[raw.length - 1].days : d0 + 1
+  const pts = raw.map(p => ({
+    ...p,
+    x: PAD.l + (p.days - d0) / (d1 - d0) * W,
+    y: PAD.t + (hi - p.rate) / (hi - lo) * H,
+  }))
+  const fpt = fx ? {
+    x: PAD.l + (fx.days - d0) / (d1 - d0) * W,
+    y: PAD.t + (hi - fx.rate) / (hi - lo) * H,
+  } : null
+  // nice 刻度:1/2/5×10^k,约 3~4 格(直接携带 y 坐标,模板免再算)
+  const span = hi - lo, mag = 10 ** Math.floor(Math.log10(span / 3))
+  const nrm = span / 3 / mag
+  const step = (nrm >= 5 ? 5 : nrm >= 2 ? 2 : 1) * mag
+  const yTicks = []
+  for (let v = Math.ceil(lo / step) * step; v <= hi + 1e-9; v += step) {
+    yTicks.push({ v: +v.toFixed(8), y: PAD.t + (hi - v) / (hi - lo) * H })
+  }
+  return { pts, fpt, yTicks, path: pts.map(p => `${p.x.toFixed(2)},${p.y.toFixed(2)}`).join(' ') }
+})
+
+const tipStyle = computed(() => {
+  if (hoverIdx.value == null) return {}
+  const p = curveChart.value.pts[hoverIdx.value]
+  return { left: (p.x / CHART_W * 100) + '%', top: (p.y / CHART_H * 100) + '%' }
+})
+const tipClass = computed(() => {
+  if (hoverIdx.value == null) return ''
+  const p = curveChart.value.pts[hoverIdx.value]
+  return p.x < CHART_W * 0.15 ? 'edge-l' : p.x > CHART_W * 0.85 ? 'edge-r' : ''
+})
+
+function onChartMove(e) {
+  const { pts } = curveChart.value
+  if (!pts.length) { hoverIdx.value = null; return }
+  const rect = e.currentTarget.getBoundingClientRect()
+  const x = (e.clientX - rect.left) / rect.width * CHART_W
+  let best = 0, bd = Infinity
+  pts.forEach((p, i) => { const d = Math.abs(p.x - x); if (d < bd) { bd = d; best = i } })
+  hoverIdx.value = best
+}
+
+function onChartKey(e) {
+  const n = curveChart.value.pts.length
+  if (!n) return
+  if (e.key === 'ArrowRight') {
+    hoverIdx.value = hoverIdx.value == null ? 0 : Math.min(n - 1, hoverIdx.value + 1)
+    e.preventDefault()
+  } else if (e.key === 'ArrowLeft') {
+    hoverIdx.value = hoverIdx.value == null ? n - 1 : Math.max(0, hoverIdx.value - 1)
+    e.preventDefault()
+  } else if (e.key === 'Escape') {
+    hoverIdx.value = null
+  }
+}
 
 const attrRows = computed(() => {
   const a = attributionResult.value
@@ -562,6 +703,30 @@ async function onAttribution() {
 .muted { color: var(--irs-muted); }
 .section-h { color: var(--irs-text); margin: 8px 0; font-size: 14px; }
 .result-tabs :deep(.el-tabs__item) { font-size: 14px; }
+
+/* —— 市场曲线:左表右图 —— */
+.curve-layout { display: flex; gap: 20px; align-items: stretch; flex-wrap: wrap; }
+.curve-left { width: 300px; flex: none; }
+.curve-right { flex: 1; min-width: 340px; display: flex; align-items: center; justify-content: center; }
+.curve-empty { height: 220px; display: flex; align-items: center; justify-content: center; }
+.curve-chart { position: relative; width: 100%; max-width: 760px; }
+.curve-chart svg { display: block; outline: none; cursor: crosshair; }
+.curve-chart svg:focus-visible { outline: 1px solid var(--el-color-primary); outline-offset: 2px; }
+.chart-title { font-size: 12px; fill: var(--irs-text); }
+.axis-text { font-size: 11px; fill: #898781; font-variant-numeric: tabular-nums; }
+.curve-lbl { font-size: 11px; fill: #c3c2b7; font-variant-numeric: tabular-nums; }
+.curve-tip {
+  position: absolute; pointer-events: none; z-index: 5; white-space: nowrap;
+  background: #1f1f1e; border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 6px;
+  padding: 6px 10px; transform: translate(-50%, -120%);
+}
+.curve-tip.edge-l { transform: translate(0, -120%); }
+.curve-tip.edge-r { transform: translate(-100%, -120%); }
+.tip-val { font-size: 14px; font-weight: 600; color: #f0efec; font-variant-numeric: tabular-nums; }
+.tip-key { font-size: 11px; color: #c3c2b7; margin-top: 2px; display: flex; align-items: center; gap: 6px; }
+.key-line { display: inline-block; width: 12px; height: 2px; background: #3987e5; border-radius: 1px; }
+.fixing-chip { margin-top: 8px; }
+.fixing-chip b { color: var(--irs-text); }
 
 @media (max-width: 1100px) {
   .layout { flex-direction: column; }
