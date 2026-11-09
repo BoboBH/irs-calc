@@ -6,8 +6,9 @@ description: 调用本地利率互换(IRS)计算器服务:估值(NPV/DV01/现金
 # IRS 计算器 API 调用指南
 
 银行间 IRS(FR007/Shibor 3M)单笔合约计算器。FastAPI 后端,本文教你用 curl 正确调用。
-若本项目已注册 MCP(`claude mcp list` 有 `irs-calc`),优先直接用 MCP 工具
-(load_market / value_swap / campisi_attribution / par_rate),语义与下文 API 相同。
+若本项目已注册 MCP(streamable HTTP,端点 `http://127.0.0.1:8000/mcp`;`claude mcp list`
+可见 `irs-calc`),优先直接用 MCP 工具(load_market / value_swap / campisi_attribution /
+par_rate),语义与下文 API 相同。
 
 ## 0. 健康检查与行情加载
 

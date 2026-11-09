@@ -1,7 +1,13 @@
-"""IRS 计算器 MCP 服务器:把本服务的 HTTP API 1:1 包装成 MCP 工具,供 AI agent 调用。
+"""IRS 计算器 MCP 服务器(streamable HTTP,与 API 同端口同进程)。
 
-前置:先启动后端(uvicorn app.main:app --port 8000),本服务器只是薄封装,
-口径(schema 校验/缺省值/定盘加载/错误映射)全部以 API 为唯一真源,不在本地重复实现。
+由 main.py 挂载:工具路由(默认 /mcp)借入 FastAPI 路由表,session manager
+随 FastAPI lifespan 启停。工具经 httpx.ASGITransport **进程内直调**同一 HTTP
+接口——schema 校验/缺省值/错误映射与外部调用逐字一致,单一实现即单一真源,
+不存在"服务不可达"(MCP 可用 ⟺ 服务在跑)。
+
+agent 接入:
+- Claude Code:claude mcp add --transport http irs-calc http://127.0.0.1:8000/mcp
+- 任意 MCP 客户端:streamable HTTP 端点 http://127.0.0.1:8000/mcp
 
 单位口径(与 API 一致,工具参数同名同义):
 - 利率一律百分数:fixed_rate=1.65 即 1.65%;曲线点 rate 同;
@@ -10,19 +16,11 @@
 - curve 空 = 按估值日自动加载行情曲线(agent 最省事的用法);
 - fixing_lag_bd 缺省 1 = 合约标准 T-1 定盘(CFETS 标准合约要素);
 - 页面默认口径为贴现 cont + 本金交割 principal_exchange=True,对账页面时显式传同名参数。
-
-启动(stdio):backend/.venv/Scripts/python.exe -m app.mcp_server
-Claude Code 注册:claude mcp add irs-calc -- <venv 绝对路径>/python.exe -m app.mcp_server
-(工作目录需在 backend/,或用绝对路径;-m app.mcp_server 依赖 cwd 含 app 包)
 """
 from __future__ import annotations
 
-import os
-
 import httpx
 from mcp.server.fastmcp import FastMCP
-
-API = os.environ.get("IRS_API_BASE", "http://127.0.0.1:8000").rstrip("/")
 
 mcp = FastMCP(
     "irs-calc",
@@ -33,39 +31,28 @@ mcp = FastMCP(
         "curve 传空数组即按估值日自动加载行情曲线,最省事;"
         "缺省口径为合约标准 T-1 定盘(fixing_lag_bd=1)、单利贴现、不含本金交割,"
         "与前端页面对账需显式传 discount_basis='cont'、principal_exchange=True。"
-        "所有工具要求本服务已启动(默认 http://127.0.0.1:8000)。"
     ),
 )
 
 
-def _get(path: str, params: dict) -> dict:
-    try:
-        r = httpx.get(f"{API}{path}", params=params, timeout=60)
-    except httpx.ConnectError as e:
-        raise RuntimeError(
-            f"IRS 计算器服务不可达({API}):请先启动后端 "
-            f"cd backend && .venv/Scripts/python.exe -m uvicorn app.main:app --port 8000"
-        ) from e
+async def _request(method: str, path: str, *, params: dict | None = None,
+                   json: dict | None = None) -> dict:
+    """进程内直调 FastAPI(ASGITransport),错误映射与 API 响应逐字一致。"""
+    from app.main import app  # 延迟导入:main 挂载本模块,避免环
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://irs-local") as client:
+        r = await client.request(method, path, params=params, json=json, timeout=60)
     if r.status_code >= 400:
-        raise RuntimeError(f"HTTP {r.status_code}: {r.json().get('detail', r.text)}")
-    return r.json()
-
-
-def _post(path: str, payload: dict) -> dict:
-    try:
-        r = httpx.post(f"{API}{path}", json=payload, timeout=60)
-    except httpx.ConnectError as e:
-        raise RuntimeError(
-            f"IRS 计算器服务不可达({API}):请先启动后端 "
-            f"cd backend && .venv/Scripts/python.exe -m uvicorn app.main:app --port 8000"
-        ) from e
-    if r.status_code >= 400:
-        raise RuntimeError(f"HTTP {r.status_code}: {r.json().get('detail', r.text)}")
+        try:
+            detail = r.json().get("detail", r.text)
+        except Exception:
+            detail = r.text
+        raise RuntimeError(f"HTTP {r.status_code}: {detail}")
     return r.json()
 
 
 @mcp.tool()
-def load_market(benchmark: str, date: str) -> dict:
+async def load_market(benchmark: str, date: str) -> dict:
     """加载行情:曲线报价点 + 当期定盘。
 
     Args:
@@ -73,11 +60,11 @@ def load_market(benchmark: str, date: str) -> dict:
         date: 行情日期,ISO 串(如 "2026-11-06")
 
     Returns:
-        {benchmark, valuation_date, curve: [{tenor, rate(%)}], fixing: {date, rate(%)} | null,
+        {benchmark, valuation_date, curve: [{tenor, rate(%)}], fixing: {date, rate(%)} | None,
          calendar_approximate};fixing=None 表示该日早于定盘序列起点。
-        curve 点即 POST 估值/归因/平价时 curve 参数的行格式。
+        curve 点即估值/归因/平价工具 curve 参数的行格式。
     """
-    return _get("/api/market", {"benchmark": benchmark, "date": date})
+    return await _request("GET", "/api/market", params={"benchmark": benchmark, "date": date})
 
 
 def _trade_args(
@@ -110,7 +97,7 @@ def _trade_args(
 
 
 @mcp.tool()
-def value_swap(
+async def value_swap(
     benchmark: str,
     effective_date: str,
     maturity_date: str,
@@ -148,14 +135,14 @@ def value_swap(
         {npv, pv_fixed, pv_floating, dv01_parallel, krdv01: [{tenor, dv01}],
          cashflows: {fixed: [...], floating: [...]}, warnings: [...]}(金额均元)
     """
-    return _post("/api/value", _trade_args(
+    return await _request("POST", "/api/value", json=_trade_args(
         benchmark, effective_date, maturity_date, valuation_date, fixed_rate,
         spread_bp, notional, direction, fixed_freq_months, curve, fixing_overrides,
         discount_basis, curve_interp, fixing_lag_bd, principal_exchange))
 
 
 @mcp.tool()
-def campisi_attribution(
+async def campisi_attribution(
     benchmark: str,
     effective_date: str,
     maturity_date: str,
@@ -203,11 +190,11 @@ def campisi_attribution(
         discount_basis, curve_interp, fixing_lag_bd, principal_exchange)
     if start_date is not None:
         payload["start_date"] = start_date
-    return _post("/api/attribution", payload)
+    return await _request("POST", "/api/attribution", json=payload)
 
 
 @mcp.tool()
-def par_rate(
+async def par_rate(
     benchmark: str,
     effective_date: str,
     maturity_date: str,
@@ -234,12 +221,8 @@ def par_rate(
         {par_rate(%), annuity(N·Στ·df,固定腿单位利率现值,元), pv_floating(元)}。
         把 par_rate 代回 value_swap 的 fixed_rate 应得 NPV≈0。
     """
-    return _post("/api/par_rate", _trade_args(
+    return await _request("POST", "/api/par_rate", json=_trade_args(
         benchmark, effective_date, maturity_date, valuation_date, 1.65,
         spread_bp, 100_000_000, "receiver", fixed_freq_months, curve,
         fixing_overrides, discount_basis, curve_interp, fixing_lag_bd,
         principal_exchange))
-
-
-if __name__ == "__main__":
-    mcp.run()  # stdio(缺省)

@@ -36,3 +36,28 @@ async def test_four_tools_registered_with_trade_params():
     assert "基点" in tools["value_swap"].description
     assert "百分数" in tools["value_swap"].description
     assert "Campisi" in tools["campisi_attribution"].description
+
+
+def test_mcp_streamable_http_endpoint_on_main_app():
+    """/mcp 挂在 FastAPI 主应用(streamable HTTP,同端口):initialize 握手 200
+    且返回 serverInfo;同时证明 lifespan 已启动 session manager。"""
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    with TestClient(app) as client:
+        # SDK 的 DNS rebinding 防护校验 Host(仅放行 localhost 形态),须发真实 Host
+        host = {"Accept": "application/json, text/event-stream",
+                "Host": "127.0.0.1:8000"}
+        r = client.post(
+            "/mcp",
+            json={"jsonrpc": "2.0", "id": 1, "method": "initialize",
+                  "params": {"protocolVersion": "2025-06-18", "capabilities": {},
+                             "clientInfo": {"name": "pytest", "version": "0"}}},
+            headers=host,
+        )
+        assert r.status_code == 200
+        assert "irs-calc" in r.text          # serverInfo.name 随 result 返回(SSE 或 JSON)
+        # 非法 JSON-RPC → 4xx(端点在,协议校验在),而不是 404
+        r2 = client.post("/mcp", content=b"not json", headers=host)
+        assert 400 <= r2.status_code < 500

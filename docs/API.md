@@ -5,7 +5,7 @@
 | 方式 | 适用 | 入口 |
 |---|---|---|
 | **HTTP API**(本文) | 人工程序调用、脚本、任何语言 | `http://127.0.0.1:8000` |
-| **MCP** | AI agent(Claude Code / Claude Desktop 等) | `backend/app/mcp_server.py`(4 个工具) |
+| **MCP** | AI agent(Claude Code / Claude Desktop 等) | `http://127.0.0.1:8000/mcp`(streamable HTTP,与 API 同端口) |
 | **Claude Code 技能** | 本仓库内的 Claude Code 会话 | `.claude/skills/irs-calc/SKILL.md` |
 
 交互式文档(浏览器直接打开):**`http://127.0.0.1:8000/docs`**(Swagger UI,可在线试调);机器可读契约:`http://127.0.0.1:8000/openapi.json`(可直接代码生成客户端)。
@@ -139,7 +139,7 @@ curl -s -X POST http://127.0.0.1:8000/api/par_rate -H "Content-Type: application
 
 ## 6. MCP 接入(AI agent)
 
-`backend/app/mcp_server.py` 把上列 API 1:1 包装为 4 个 MCP 工具(**前置:本服务已启动**):
+**streamable HTTP、与 API 同端口**:MCP 端点就是 `http://127.0.0.1:8000/mcp`,由同一 uvicorn 进程挂载([backend/app/mcp_server.py](../backend/app/mcp_server.py));工具经 ASGI 在进程内直调上列 HTTP 接口——schema 校验/缺省值/错误映射与外部调用逐字一致,**无独立进程、无需额外配置**。启动服务即同时提供 API 与 MCP。
 
 | 工具 | 对应 API | 说明 |
 |---|---|---|
@@ -148,25 +148,25 @@ curl -s -X POST http://127.0.0.1:8000/api/par_rate -H "Content-Type: application
 | `campisi_attribution(…, start_date=None)` | POST /api/attribution | Campisi 因子 |
 | `par_rate(benchmark, effective_date, maturity_date, valuation_date, …)` | POST /api/par_rate | 平价利率 |
 
-工具参数与 API 字段**同名同义**(利率百分数、利差基点、curve 空数组自动加载),docstring 内含全部口径说明,服务不可达时报错并提示启动命令。
+工具参数与 API 字段**同名同义**(利率百分数、利差基点、curve 空数组自动加载),docstring 内含全部口径说明。
 
-**Claude Code 注册**(本机,项目级):
+**Claude Code 注册**:
 
 ```bash
-claude mcp add irs-calc -- D:/git/irs-calc/backend/.venv/Scripts/python.exe D:/git/irs-calc/backend/app/mcp_server.py
+claude mcp add --transport http irs-calc http://127.0.0.1:8000/mcp
+# 其他 MCP 客户端同理:transport=streamable http,url 指向 /mcp
 ```
 
-其他机器把两处路径换成对应 venv 解释器与仓库路径即可;自定义服务地址用环境变量 `IRS_API_BASE`(默认 `http://127.0.0.1:8000`)。
+**Claude Desktop**:设置 → Connectors → 添加自定义连接器,URL 填 `http://127.0.0.1:8000/mcp`。
 
-**Claude Desktop**(claude_desktop_config.json):
+手动冒烟(应 200 并返回含 `serverInfo` 的握手结果):
 
-```json
-{"mcpServers": {"irs-calc": {
-  "command": "D:/git/irs-calc/backend/.venv/Scripts/python.exe",
-  "args": ["D:/git/irs-calc/backend/app/mcp_server.py"]}}}
+```bash
+curl -s -X POST http://127.0.0.1:8000/mcp \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"curl","version":"0"}}}'
 ```
-
-手动冒烟:`cd backend && .venv/Scripts/python.exe app/mcp_server.py`(stdio,等待 JSON-RPC)。
 
 ## 7. Claude Code 技能
 
