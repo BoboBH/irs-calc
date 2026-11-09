@@ -106,6 +106,7 @@ curl -s -X POST http://127.0.0.1:8000/api/attribution -H "Content-Type: applicat
 | `spread` | 利差效应;单曲线口径恒 0 |
 | `residual` | 残差:ΔNPV − 各因子之和 |
 
+- **一次调用 = 归因 + 估值**:`valuation_t1` 即窗口末全量估值,字段与 `/api/value` 返回完全一致——要估值+归因通常调本接口一次即可;前端「计算估值」即按此语义一并完成两者,默认展示 Campisi 归因 Tab;
 - **恒等式构造上恒成立**:ΔNPV = theta+carry+roll+curve+spread+residual;`cf` 为窗口内已支付现金流;
 - **curve 两种模式**:显式 `curve` → 两日同形,`curve` 分量恒 0(纯时间分解,页面模式);`curve:[]` → 自动加载 t0/T 两日真实行情曲线,`curve` 分量为真实曲线变动效应;
 - **`identity.ok`**:恒等式重加总 + ΣKRDV01 机制校验 + 残差门(5%·max(|ΔNPV|,|Curve|,1))三者综合。`false` = 残差门拒绝(两日曲线大幅移动 + 单利贴现时一阶展开不干净),因子数值仍成立但解读需谨慎;`identity.diff` 仅为浮点噪声口径;

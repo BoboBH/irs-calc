@@ -49,6 +49,8 @@ curl -s -X POST http://127.0.0.1:8000/api/value -H "Content-Type: application/js
 
 `direction`:receiver=收固定付浮动;`fixed_freq_months` 固定腿付息周期(缺省 3;浮动端随基准,FR007 周、Shibor3M 季)。
 
+**估值 + Campisi 归因要一起时,通常只调 §3 一次即可**——归因响应含 `valuation_t1`(窗口末全量估值,字段同本节返回);前端页面「计算估值」也是一并完成两者并默认展示 Campisi 归因 Tab。
+
 ## 3. Campisi 归因 POST /api/attribution(核心)
 
 ```bash
@@ -63,11 +65,13 @@ curl -s -X POST http://127.0.0.1:8000/api/attribution -H "Content-Type: applicat
 返回:`{delta_npv, cf(窗口内已付现金流), components:{theta,carry,roll,curve,spread,residual},
 detail:[逐关键期限], identity:{ok,diff}, valuation_t1:{窗口末全量估值}, warnings}`。
 
+- **一次调用 = 归因 + 估值**:`valuation_t1` 即窗口末的全量估值,npv/pv_fixed/pv_floating/
+  dv01_parallel/krdv01/cashflows 字段与 `/api/value` 返回完全一致,一般无需再单独调估值;
 - 恒等式:ΔNPV = theta+carry+roll+curve+spread+residual(**构造上恒成立**);
 - 因子:theta=静态曲线推进的时间效应,carry=票息效应(固定利息−浮动计提),roll=theta−carry(骑乘),
   curve=关键期限 KRDV01×曲线变动,spread 恒 0(单曲线);
 - **curve 两种模式**:`curve:[]` → 自动加载 t0/T 两日真实行情曲线(curve 分量为真实曲线效应);
-  显式 curve → 两日同形(curve≡0,纯时间分解,页面即此模式);
+  显式 curve → 两日同形(curve≡0,纯时间分解;前端在用户手动改过曲线后用此模式);
 - `identity.ok=false` = 残差门(5%·max(|ΔNPV|,|Curve|,1))拒绝:一阶分解不干净(常见于
   两日曲线大幅移动+单利贴现),因子仍成立但解读需谨慎;
 - `start_date` 留空 = 自动取行情中估值日的上一交易日;估值日为非交易日 → 全零归因+warning(正常语义);
