@@ -37,7 +37,7 @@ cd backend && ./.venv/Scripts/python.exe -m pytest
 
 - **HTTP API**:行情/估值/Campisi 归因/平价 4 个端点;单位口径(利率 %、利差 bp)、字段表、错误码与端到端示例见 **[docs/API.md](docs/API.md)**;交互式文档 `/docs`,OpenAPI 契约 `/openapi.json`。
 - **MCP**(streamable HTTP,与 API **同端口**):[backend/app/mcp_server.py](backend/app/mcp_server.py) 挂载进 FastAPI,端点 `http://127.0.0.1:8000/mcp`,把 API 1:1 包装成 4 个工具(`load_market` / `value_swap` / `campisi_attribution` / `par_rate`)供 AI agent 调用;工具经 ASGI 进程内直调 API,口径单一实现。注册:`claude mcp add --transport http irs-calc http://127.0.0.1:8000/mcp`。
-- **Claude Code 技能**:[.claude/skills/irs-calc/SKILL.md](.claude/skills/irs-calc/SKILL.md)——会话中提及 IRS 估值 / Campisi 归因 / 平价利率 / DV01 / 定盘查询时自动触发,引导按正确口径调 API。
+- **Claude Code 技能**:[skills/irs-calc/SKILL.md](skills/irs-calc/SKILL.md)——会话中提及 IRS 估值 / Campisi 归因 / 平价利率 / DV01 / 定盘查询时自动触发,引导按正确口径调 API。正身独立于 `.claude/` 便于 git 管理与复用;`.claude/skills/irs-calc/SKILL.md` 仅留自动发现入口(两行引导,指向正身,内容单一维护)。
 
 ## 估值页默认行为
 

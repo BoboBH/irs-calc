@@ -6,7 +6,7 @@
 |---|---|---|
 | **HTTP API**(本文) | 人工程序调用、脚本、任何语言 | `http://127.0.0.1:8000` |
 | **MCP** | AI agent(Claude Code / Claude Desktop 等) | `http://127.0.0.1:8000/mcp`(streamable HTTP,与 API 同端口) |
-| **Claude Code 技能** | 本仓库内的 Claude Code 会话 | `.claude/skills/irs-calc/SKILL.md` |
+| **Claude Code 技能** | 本仓库内的 Claude Code 会话 | `skills/irs-calc/SKILL.md` |
 
 交互式文档(浏览器直接打开):**`http://127.0.0.1:8000/docs`**(Swagger UI,可在线试调);机器可读契约:`http://127.0.0.1:8000/openapi.json`(可直接代码生成客户端)。
 
@@ -170,7 +170,7 @@ curl -s -X POST http://127.0.0.1:8000/mcp \
 
 ## 7. Claude Code 技能
 
-仓库自带项目技能 `.claude/skills/irs-calc/SKILL.md`:在 Claude Code 中提到"IRS 估值 / Campisi 归因 / 平价利率 / DV01 / FR007 定盘"即自动触发,内含健康检查、口径表、curl 模板与错误处理(与本文一致)。已注册 MCP 时优先走 MCP 工具。
+仓库自带项目技能,正身在 `skills/irs-calc/SKILL.md`(独立于 `.claude/` 便于 git 管理与复用):在 Claude Code 中提到"IRS 估值 / Campisi 归因 / 平价利率 / DV01 / FR007 定盘"即自动触发,内含健康检查、口径表、curl 模板与错误处理(与本文一致)。`.claude/skills/irs-calc/SKILL.md` 仅为自动发现入口 stub(两行引导指向正身)。已注册 MCP 时优先走 MCP 工具。
 
 ## 8. 最小客户端示例
 
