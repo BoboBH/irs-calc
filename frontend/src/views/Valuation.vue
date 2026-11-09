@@ -122,7 +122,6 @@
         <div class="actions">
           <el-button type="primary" plain :loading="loadingMarket" @click="onLoadMarket">加载行情</el-button>
           <el-button type="primary" :loading="loadingValue" @click="onValue">计算估值</el-button>
-          <el-button type="success" :loading="loadingAttr" @click="onAttribution">计算归因</el-button>
         </div>
       </aside>
 
@@ -383,7 +382,6 @@ const fixingInfo = ref(null)
 const marketApprox = ref(false)
 const loadingMarket = ref(false)
 const loadingValue = ref(false)
-const loadingAttr = ref(false)
 const valueResult = ref(null)
 const attributionResult = ref(null)
 const warnings = ref([])
@@ -660,32 +658,32 @@ async function onLoadMarket() {
   }
 }
 
+// 计算估值 = 估值 + Campisi 归因一并完成(两请求并行,口径同源);
+// 全部成功默认展示 Campisi 归因 Tab;归因单独失败不掩盖估值结果,仅提示
 async function onValue() {
   loadingValue.value = true
   try {
-    valueResult.value = await postValue(payload())
-    warnings.value = valueResult.value.warnings || []
-    attributionResult.value = null
-    activeTab.value = 'krdv'
-  } catch (e) {
-    ElMessage.error(errText(e))
+    // t0 留空发 null → 后端默认窗口(行情中 T-1 = max(d<T));T 非交易日返回全零 + 告警
+    const attrPayload = { ...payload(), start_date: form.value.startDate || null,
+                          curve: attributionCurve() }
+    const [vR, aR] = await Promise.allSettled([postValue(payload()), postAttribution(attrPayload)])
+    if (vR.status === 'rejected') {
+      ElMessage.error(errText(vR.reason))
+    } else {
+      valueResult.value = vR.value
+      if (aR.status === 'fulfilled') {
+        attributionResult.value = aR.value
+        // 两接口告警合并去重(定盘陈旧等共用告警只显示一次)
+        warnings.value = [...new Set([...(vR.value.warnings || []), ...(aR.value.warnings || [])])]
+        activeTab.value = 'attr'
+      } else {
+        warnings.value = vR.value.warnings || []
+        ElMessage.error(`归因失败:${errText(aR.reason)}`)
+        activeTab.value = 'krdv'
+      }
+    }
   } finally {
     loadingValue.value = false
-  }
-}
-
-async function onAttribution() {
-  loadingAttr.value = true
-  try {
-    // t0 留空发 null → 后端默认窗口(行情中 T-1 = max(d<T));T 非交易日返回全零 + 告警
-    const p = { ...payload(), start_date: form.value.startDate || null, curve: attributionCurve() }
-    attributionResult.value = await postAttribution(p)
-    warnings.value = attributionResult.value.warnings || []
-    activeTab.value = 'attr'
-  } catch (e) {
-    ElMessage.error(errText(e))
-  } finally {
-    loadingAttr.value = false
   }
 }
 
