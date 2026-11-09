@@ -33,6 +33,12 @@ cd ../backend && ./.venv/Scripts/python.exe -m uvicorn app.main:app --port 8000
 cd backend && ./.venv/Scripts/python.exe -m pytest
 ```
 
+## 对外接入(HTTP API / MCP / Claude Code 技能)
+
+- **HTTP API**:行情/估值/Campisi 归因/平价 4 个端点;单位口径(利率 %、利差 bp)、字段表、错误码与端到端示例见 **[docs/API.md](docs/API.md)**;交互式文档 `/docs`,OpenAPI 契约 `/openapi.json`。
+- **MCP**:[backend/app/mcp_server.py](backend/app/mcp_server.py) 把 API 1:1 包装成 4 个工具(`load_market` / `value_swap` / `campisi_attribution` / `par_rate`)供 AI agent 调用,需本服务已启动;注册:`claude mcp add irs-calc -- <venv绝对路径>/python.exe <repo绝对路径>/backend/app/mcp_server.py`(自定义服务地址用环境变量 `IRS_API_BASE`)。
+- **Claude Code 技能**:[.claude/skills/irs-calc/SKILL.md](.claude/skills/irs-calc/SKILL.md)——会话中提及 IRS 估值 / Campisi 归因 / 平价利率 / DV01 / 定盘查询时自动触发,引导按正确口径调 API。
+
 ## 估值页默认行为
 
 - 进入估值页**自动加载行情**(无需手动点击)。
